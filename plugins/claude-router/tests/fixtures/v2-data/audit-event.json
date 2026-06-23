@@ -1,0 +1,16 @@
+{
+  "id": "audit_example",
+  "createdAt": "2026-06-23T14:00:01.000Z",
+  "eventType": "policy_decision",
+  "workspaceRoot": "/workspace",
+  "jobId": "job_example",
+  "intentId": "intent_example",
+  "decisionId": "decision_example",
+  "actor": {
+    "host": "codex",
+    "modelFamily": "gpt"
+  },
+  "summary": "Allowed workspace_read analyze job with permission-mode plan.",
+  "redactedCommand": "claude -p --permission-mode plan --output-format json [PROMPT_SHA256:0123456789abcdef]",
+  "reasonCodes": ["WORKSPACE_READ_ALLOWED"]
+}

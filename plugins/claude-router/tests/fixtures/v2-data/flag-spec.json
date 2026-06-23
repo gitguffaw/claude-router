@@ -1,0 +1,16 @@
+{
+  "id": "flag.claude.permission-mode",
+  "names": ["--permission-mode"],
+  "type": "enum",
+  "repeatable": false,
+  "requiresValue": true,
+  "allowedValues": ["default", "acceptEdits", "plan", "bypassPermissions"],
+  "appliesTo": ["print", "interactive"],
+  "riskByValue": {
+    "plan": ["workspace_read"],
+    "acceptEdits": ["workspace_write"],
+    "bypassPermissions": ["privilege_bypass"]
+  },
+  "sensitive": false,
+  "source": "local-help"
+}

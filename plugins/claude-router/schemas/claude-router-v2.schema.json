@@ -1,0 +1,742 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gitguffaw/claude-router/schemas/claude-router-v2.schema.json",
+  "title": "Claude Router V2 Records",
+  "description": "Data contracts for Safe Smart Claude CLI V2.",
+  "oneOf": [
+    { "$ref": "#/$defs/ClaudeSurfaceSnapshot" },
+    { "$ref": "#/$defs/CommandSpec" },
+    { "$ref": "#/$defs/FlagSpec" },
+    { "$ref": "#/$defs/Capability" },
+    { "$ref": "#/$defs/RouteIntent" },
+    { "$ref": "#/$defs/PolicyDecision" },
+    { "$ref": "#/$defs/ApprovalRecord" },
+    { "$ref": "#/$defs/ExecutionPlan" },
+    { "$ref": "#/$defs/JobV2" },
+    { "$ref": "#/$defs/AuditEvent" },
+    { "$ref": "#/$defs/RedactionPolicy" }
+  ],
+  "x-recordDefinitions": [
+    "ClaudeSurfaceSnapshot",
+    "CommandSpec",
+    "FlagSpec",
+    "Capability",
+    "RouteIntent",
+    "PolicyDecision",
+    "ApprovalRecord",
+    "ExecutionPlan",
+    "JobV2",
+    "AuditEvent",
+    "RedactionPolicy"
+  ],
+  "$defs": {
+    "RiskClass": {
+      "type": "string",
+      "enum": [
+        "safe_read",
+        "workspace_read",
+        "workspace_write",
+        "config_mutation",
+        "destructive",
+        "privilege_bypass",
+        "external_code_or_network",
+        "interactive_or_long_running",
+        "unknown_high_risk"
+      ]
+    },
+    "Decision": {
+      "type": "string",
+      "enum": ["allow", "block", "requires_user_approval", "requires_explicit_override", "degraded"]
+    },
+    "RiskProfile": {
+      "type": "object",
+      "required": [
+        "classes",
+        "mutability",
+        "writesWorkspace",
+        "writesClaudeConfig",
+        "usesExternalCode",
+        "requiresNetwork",
+        "permissionBypass",
+        "requiresTTY"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "classes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RiskClass" }
+        },
+        "mutability": {
+          "type": "string",
+          "enum": ["none", "workspace", "claude_config", "external", "destructive", "unknown"]
+        },
+        "writesWorkspace": { "type": "boolean" },
+        "writesClaudeConfig": { "type": "boolean" },
+        "usesExternalCode": { "type": "boolean" },
+        "requiresNetwork": { "type": "boolean" },
+        "permissionBypass": { "type": "boolean" },
+        "requiresTTY": { "type": "boolean" }
+      }
+    },
+    "FlagSpec": {
+      "type": "object",
+      "required": [
+        "id",
+        "names",
+        "type",
+        "repeatable",
+        "requiresValue",
+        "appliesTo",
+        "sensitive",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "names": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "boolean",
+            "string",
+            "integer",
+            "number",
+            "enum",
+            "path",
+            "path-list",
+            "json",
+            "string-list"
+          ]
+        },
+        "repeatable": { "type": "boolean" },
+        "requiresValue": { "type": "boolean" },
+        "allowedValues": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "appliesTo": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "riskByValue": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/RiskClass" }
+          }
+        },
+        "sensitive": { "type": "boolean" },
+        "source": {
+          "type": "string",
+          "enum": ["local-help", "official-docs", "manual-policy", "inferred"]
+        }
+      }
+    },
+    "CommandSpec": {
+      "type": "object",
+      "required": [
+        "id",
+        "commandPath",
+        "aliases",
+        "summary",
+        "interactionKind",
+        "availability",
+        "risk",
+        "flags",
+        "positionals",
+        "outputs",
+        "defaultDecision"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "commandPath": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "summary": { "type": "string" },
+        "interactionKind": {
+          "type": "string",
+          "enum": ["print", "interactive", "noninteractive", "background", "admin", "diagnostic", "long_running"]
+        },
+        "availability": {
+          "type": "object",
+          "required": ["source", "snapshotId"],
+          "additionalProperties": false,
+          "properties": {
+            "minClaudeVersion": { "type": ["string", "null"] },
+            "source": {
+              "type": "string",
+              "enum": ["local-help", "official-docs", "manual-policy", "inferred"]
+            },
+            "snapshotId": { "type": ["string", "null"] }
+          }
+        },
+        "risk": { "$ref": "#/$defs/RiskProfile" },
+        "flags": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FlagSpec" }
+        },
+        "positionals": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["text", "json", "streaming-json", "side-effect"]
+          }
+        },
+        "defaultDecision": {
+          "$ref": "#/$defs/Decision"
+        }
+      }
+    },
+    "ClaudeSurfaceSnapshot": {
+      "type": "object",
+      "required": [
+        "id",
+        "schemaVersion",
+        "capturedAt",
+        "binary",
+        "version",
+        "platform",
+        "commands",
+        "flags",
+        "parseWarnings",
+        "drift",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "schemaVersion": { "type": "integer" },
+        "capturedAt": { "type": "string" },
+        "binary": { "type": "string" },
+        "version": { "type": "string" },
+        "platform": {
+          "type": "object",
+          "required": ["os", "arch"],
+          "additionalProperties": false,
+          "properties": {
+            "os": { "type": "string" },
+            "arch": { "type": "string" },
+            "node": { "type": "string" }
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CommandSpec" }
+        },
+        "flags": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FlagSpec" }
+        },
+        "parseWarnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "drift": {
+          "type": "object",
+          "required": ["status", "docsAheadOfLocal", "unknownCommands"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "type": "string", "enum": ["current", "changed", "degraded"] },
+            "docsAheadOfLocal": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "unknownCommands": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "source": {
+          "type": "object",
+          "required": ["localHelp", "officialDocsCheckedAt", "officialDocsUrls"],
+          "additionalProperties": false,
+          "properties": {
+            "localHelp": { "type": "boolean" },
+            "officialDocsCheckedAt": { "type": "string" },
+            "officialDocsUrls": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "Capability": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "displayName",
+        "mapsTo",
+        "supportedHostTools",
+        "argsSchemaRef",
+        "risk",
+        "policyRef",
+        "outputContract",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "managed_tool",
+            "raw_command",
+            "status_command",
+            "interactive_session",
+            "background_agent",
+            "config_admin",
+            "diagnostic",
+            "surface_inspection"
+          ]
+        },
+        "displayName": { "type": "string" },
+        "mapsTo": {
+          "type": "object",
+          "required": ["commandPath", "baseArgs", "mode"],
+          "additionalProperties": false,
+          "properties": {
+            "commandPath": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "baseArgs": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "mode": { "type": "string" }
+          }
+        },
+        "supportedHostTools": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "argsSchemaRef": { "type": "string" },
+        "risk": { "$ref": "#/$defs/RiskProfile" },
+        "policyRef": { "type": "string" },
+        "outputContract": {
+          "type": "object",
+          "required": ["format"],
+          "additionalProperties": false,
+          "properties": {
+            "format": { "type": "string" },
+            "schemaRef": { "type": ["string", "null"] }
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["stable", "experimental", "guarded", "blocked", "degraded"]
+        }
+      }
+    },
+    "RouteIntent": {
+      "type": "object",
+      "required": [
+        "id",
+        "createdAt",
+        "host",
+        "tool",
+        "workspaceRoot",
+        "cwd",
+        "capabilityId",
+        "prompt",
+        "rawArgs",
+        "requestedControls",
+        "background",
+        "timeoutMs",
+        "approvalId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "host": { "type": "string" },
+        "tool": { "type": "string" },
+        "workspaceRoot": { "type": "string" },
+        "cwd": { "type": "string" },
+        "capabilityId": { "type": "string" },
+        "prompt": {
+          "type": "object",
+          "required": ["present", "sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "present": { "type": "boolean" },
+            "sha256": { "type": ["string", "null"] },
+            "redactedPreview": { "type": ["string", "null"] }
+          }
+        },
+        "rawArgs": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "requestedControls": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "background": { "type": "boolean" },
+        "timeoutMs": { "type": "integer" },
+        "approvalId": { "type": ["string", "null"] }
+      }
+    },
+    "PolicyDecision": {
+      "type": "object",
+      "required": [
+        "id",
+        "policyVersion",
+        "classifierVersion",
+        "createdAt",
+        "intentId",
+        "capabilityId",
+        "decision",
+        "riskClasses",
+        "reasonCodes",
+        "evidence",
+        "requiredApproval",
+        "redactionPolicyId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "policyVersion": { "type": "integer" },
+        "classifierVersion": { "type": "integer" },
+        "createdAt": { "type": "string" },
+        "intentId": { "type": "string" },
+        "capabilityId": { "type": "string" },
+        "decision": { "$ref": "#/$defs/Decision" },
+        "riskClasses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RiskClass" }
+        },
+        "reasonCodes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "evidence": {
+          "type": "object",
+          "required": ["surfaceSnapshotId", "matchedCommandSpecIds", "matchedFlagSpecIds"],
+          "additionalProperties": false,
+          "properties": {
+            "surfaceSnapshotId": { "type": ["string", "null"] },
+            "matchedCommandSpecIds": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "matchedFlagSpecIds": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "requiredApproval": {
+          "type": ["object", "null"],
+          "additionalProperties": true
+        },
+        "redactionPolicyId": { "type": "string" }
+      }
+    },
+    "ApprovalRecord": {
+      "type": "object",
+      "required": [
+        "id",
+        "createdAt",
+        "expiresAt",
+        "requester",
+        "workspaceRoot",
+        "tool",
+        "classification",
+        "command",
+        "scope",
+        "approvedBy",
+        "approvalText",
+        "singleUse",
+        "usedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "requester": { "type": "string" },
+        "workspaceRoot": { "type": "string" },
+        "tool": { "type": "string" },
+        "classification": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RiskClass" }
+        },
+        "command": {
+          "type": "object",
+          "required": ["binary", "argv", "argvSha256"],
+          "additionalProperties": false,
+          "properties": {
+            "binary": { "type": "string" },
+            "argv": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "argvSha256": { "type": "string" }
+          }
+        },
+        "scope": {
+          "type": "object",
+          "required": ["cwdPolicy", "allowedSubcommands", "allowedFlags", "allowedHosts", "allowedPaths"],
+          "additionalProperties": false,
+          "properties": {
+            "cwdPolicy": { "type": "string" },
+            "allowedSubcommands": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "allowedFlags": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "allowedHosts": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "allowedPaths": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "approvedBy": { "type": "string" },
+        "approvalText": { "type": "string" },
+        "singleUse": { "type": "boolean" },
+        "usedAt": { "type": ["string", "null"] }
+      }
+    },
+    "ExecutionPlan": {
+      "type": "object",
+      "required": [
+        "id",
+        "intentId",
+        "decisionId",
+        "binary",
+        "argv",
+        "redactedArgv",
+        "cwd",
+        "envPolicy",
+        "stdioMode",
+        "timeoutMs",
+        "background",
+        "expectedOutput",
+        "readOnlyCheck"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "intentId": { "type": "string" },
+        "decisionId": { "type": "string" },
+        "binary": { "type": "string" },
+        "argv": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "redactedArgv": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "cwd": { "type": "string" },
+        "envPolicy": {
+          "type": "object",
+          "required": ["mode", "allow", "redact"],
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "type": "string", "enum": ["inherit", "filtered", "empty"] },
+            "allow": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "redact": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "stdioMode": {
+          "type": "string",
+          "enum": ["pipe", "inherit", "terminal_handoff", "background"]
+        },
+        "timeoutMs": { "type": ["integer", "null"] },
+        "background": { "type": "boolean" },
+        "expectedOutput": {
+          "type": "object",
+          "required": ["format", "schemaRef"],
+          "additionalProperties": false,
+          "properties": {
+            "format": { "type": "string" },
+            "schemaRef": { "type": ["string", "null"] }
+          }
+        },
+        "readOnlyCheck": {
+          "type": "object",
+          "required": ["enabled", "method"],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "method": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "JobV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "schemaVersion",
+        "status",
+        "phase",
+        "kind",
+        "capabilityId",
+        "surfaceSnapshotId",
+        "intentId",
+        "policyDecisionId",
+        "executionPlanId",
+        "workspaceRoot",
+        "createdAt",
+        "startedAt",
+        "completedAt",
+        "riskLevel",
+        "artifacts",
+        "terminalResult"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "schemaVersion": { "type": "integer" },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "completed",
+            "completed-with-warnings",
+            "failed",
+            "blocked",
+            "cancelled",
+            "interrupted",
+            "policy_violation"
+          ]
+        },
+        "phase": { "type": "string" },
+        "kind": { "type": "string" },
+        "capabilityId": { "type": "string" },
+        "surfaceSnapshotId": { "type": ["string", "null"] },
+        "intentId": { "type": "string" },
+        "policyDecisionId": { "type": "string" },
+        "executionPlanId": { "type": "string" },
+        "workspaceRoot": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "startedAt": { "type": ["string", "null"] },
+        "completedAt": { "type": ["string", "null"] },
+        "riskLevel": { "$ref": "#/$defs/RiskClass" },
+        "artifacts": {
+          "type": "object",
+          "required": ["contextPack", "log", "result", "validation", "audit"],
+          "additionalProperties": false,
+          "properties": {
+            "contextPack": { "type": ["string", "null"] },
+            "log": { "type": ["string", "null"] },
+            "result": { "type": ["string", "null"] },
+            "validation": { "type": ["string", "null"] },
+            "audit": { "type": ["string", "null"] }
+          }
+        },
+        "terminalResult": {
+          "type": "object",
+          "required": ["exitStatus", "jobStatus", "warnings"],
+          "additionalProperties": false,
+          "properties": {
+            "exitStatus": { "type": ["integer", "null"] },
+            "jobStatus": { "type": "string" },
+            "warnings": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "claudeSessionId": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "AuditEvent": {
+      "type": "object",
+      "required": [
+        "id",
+        "createdAt",
+        "eventType",
+        "workspaceRoot",
+        "jobId",
+        "intentId",
+        "decisionId",
+        "actor",
+        "summary",
+        "redactedCommand",
+        "reasonCodes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "eventType": { "type": "string" },
+        "workspaceRoot": { "type": "string" },
+        "jobId": { "type": ["string", "null"] },
+        "intentId": { "type": ["string", "null"] },
+        "decisionId": { "type": ["string", "null"] },
+        "actor": {
+          "type": "object",
+          "required": ["host", "modelFamily"],
+          "additionalProperties": false,
+          "properties": {
+            "host": { "type": "string" },
+            "modelFamily": { "type": ["string", "null"] }
+          }
+        },
+        "summary": { "type": "string" },
+        "redactedCommand": { "type": ["string", "null"] },
+        "reasonCodes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "RedactionPolicy": {
+      "type": "object",
+      "required": ["id", "schemaVersion", "patterns", "argNames", "envNames", "replacement"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "schemaVersion": { "type": "integer" },
+        "patterns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "argNames": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "envNames": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "replacement": { "type": "string" }
+      }
+    }
+  }
+}

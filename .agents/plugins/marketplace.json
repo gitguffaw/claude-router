@@ -1,0 +1,20 @@
+{
+  "name": "claude-router",
+  "interface": {
+    "displayName": "Claude Router"
+  },
+  "plugins": [
+    {
+      "name": "claude-router",
+      "source": {
+        "source": "local",
+        "path": "./plugins/claude-router"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

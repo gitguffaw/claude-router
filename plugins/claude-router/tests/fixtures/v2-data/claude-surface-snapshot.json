@@ -1,0 +1,72 @@
+{
+  "id": "surface_2_1_185_example",
+  "schemaVersion": 1,
+  "capturedAt": "2026-06-23T14:00:00.000Z",
+  "binary": "claude",
+  "version": "2.1.185",
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64",
+    "node": "v24.0.0"
+  },
+  "commands": [
+    {
+      "id": "command.claude.mcp.list",
+      "commandPath": ["mcp", "list"],
+      "aliases": [],
+      "summary": "List configured MCP servers.",
+      "interactionKind": "noninteractive",
+      "availability": {
+        "minClaudeVersion": null,
+        "source": "local-help",
+        "snapshotId": "surface_2_1_185_example"
+      },
+      "risk": {
+        "classes": ["safe_read"],
+        "mutability": "none",
+        "writesWorkspace": false,
+        "writesClaudeConfig": false,
+        "usesExternalCode": false,
+        "requiresNetwork": false,
+        "permissionBypass": false,
+        "requiresTTY": false
+      },
+      "flags": [],
+      "positionals": [],
+      "outputs": ["text"],
+      "defaultDecision": "allow"
+    }
+  ],
+  "flags": [
+    {
+      "id": "flag.claude.permission-mode",
+      "names": ["--permission-mode"],
+      "type": "enum",
+      "repeatable": false,
+      "requiresValue": true,
+      "allowedValues": ["default", "acceptEdits", "plan", "bypassPermissions"],
+      "appliesTo": ["print", "interactive"],
+      "riskByValue": {
+        "plan": ["workspace_read"],
+        "acceptEdits": ["workspace_write"],
+        "bypassPermissions": ["privilege_bypass"]
+      },
+      "sensitive": false,
+      "source": "local-help"
+    }
+  ],
+  "parseWarnings": [],
+  "drift": {
+    "status": "current",
+    "docsAheadOfLocal": [],
+    "unknownCommands": []
+  },
+  "source": {
+    "localHelp": true,
+    "officialDocsCheckedAt": "2026-06-23",
+    "officialDocsUrls": [
+      "https://code.claude.com/docs/en/overview",
+      "https://code.claude.com/docs/en/cli-reference"
+    ]
+  }
+}

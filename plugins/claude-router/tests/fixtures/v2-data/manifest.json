@@ -1,0 +1,48 @@
+{
+  "records": [
+    {
+      "definition": "ClaudeSurfaceSnapshot",
+      "fixture": "claude-surface-snapshot.json"
+    },
+    {
+      "definition": "CommandSpec",
+      "fixture": "command-spec.json"
+    },
+    {
+      "definition": "FlagSpec",
+      "fixture": "flag-spec.json"
+    },
+    {
+      "definition": "Capability",
+      "fixture": "capability.json"
+    },
+    {
+      "definition": "RouteIntent",
+      "fixture": "route-intent.json"
+    },
+    {
+      "definition": "PolicyDecision",
+      "fixture": "policy-decision.json"
+    },
+    {
+      "definition": "ApprovalRecord",
+      "fixture": "approval-record.json"
+    },
+    {
+      "definition": "ExecutionPlan",
+      "fixture": "execution-plan.json"
+    },
+    {
+      "definition": "JobV2",
+      "fixture": "job-v2.json"
+    },
+    {
+      "definition": "AuditEvent",
+      "fixture": "audit-event.json"
+    },
+    {
+      "definition": "RedactionPolicy",
+      "fixture": "redaction-policy.json"
+    }
+  ]
+}

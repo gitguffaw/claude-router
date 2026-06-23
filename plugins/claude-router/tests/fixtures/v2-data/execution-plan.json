@@ -1,0 +1,25 @@
+{
+  "id": "execplan_example",
+  "intentId": "intent_example",
+  "decisionId": "decision_example",
+  "binary": "claude",
+  "argv": ["-p", "--permission-mode", "plan", "--output-format", "json", "Analyze this repo."],
+  "redactedArgv": ["-p", "--permission-mode", "plan", "--output-format", "json", "[PROMPT_SHA256:0123456789abcdef]"],
+  "cwd": "/workspace",
+  "envPolicy": {
+    "mode": "filtered",
+    "allow": ["PATH", "HOME", "CLAUDE_CONFIG_DIR"],
+    "redact": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN"]
+  },
+  "stdioMode": "pipe",
+  "timeoutMs": 600000,
+  "background": false,
+  "expectedOutput": {
+    "format": "json-or-text",
+    "schemaRef": "schemas/analysis-output.schema.json"
+  },
+  "readOnlyCheck": {
+    "enabled": true,
+    "method": "git-status-before-after"
+  }
+}

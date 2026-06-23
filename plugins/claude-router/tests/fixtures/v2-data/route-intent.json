@@ -1,0 +1,22 @@
+{
+  "id": "intent_example",
+  "createdAt": "2026-06-23T14:00:00.000Z",
+  "host": "codex",
+  "tool": "claude_router_analyze",
+  "workspaceRoot": "/workspace",
+  "cwd": "/workspace",
+  "capabilityId": "capability.claude.print.analyze",
+  "prompt": {
+    "present": true,
+    "sha256": "0123456789abcdef",
+    "redactedPreview": "Analyze this repo."
+  },
+  "rawArgs": null,
+  "requestedControls": {
+    "model": "sonnet",
+    "permissionMode": "plan"
+  },
+  "background": false,
+  "timeoutMs": 600000,
+  "approvalId": null
+}

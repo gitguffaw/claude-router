@@ -1,14 +1,13 @@
 {
-  "name": "@compound/claude-router",
+  "name": "@compound/claude-router-marketplace",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Codex MCP runtime for policy-backed Claude CLI delegation.",
+  "description": "Codex plugin marketplace for policy-backed Claude CLI delegation.",
   "license": "Apache-2.0",
   "scripts": {
-    "install:codex": "node scripts/install-codex-mcp.mjs",
-    "test": "node --test tests/*.test.mjs",
-    "validate:plugin": "node scripts/validate-plugin.mjs"
+    "test": "cd plugins/claude-router && node --test tests/*.test.mjs",
+    "validate:plugin": "cd plugins/claude-router && node scripts/validate-plugin.mjs"
   },
   "engines": {
     "node": ">=18.18.0"

@@ -1,0 +1,28 @@
+{
+  "id": "capability.claude.print.analyze",
+  "kind": "managed_tool",
+  "displayName": "Claude Analyze",
+  "mapsTo": {
+    "commandPath": [],
+    "baseArgs": ["-p"],
+    "mode": "print"
+  },
+  "supportedHostTools": ["mcp"],
+  "argsSchemaRef": "schemas/analysis-output.schema.json",
+  "risk": {
+    "classes": ["workspace_read"],
+    "mutability": "none",
+    "writesWorkspace": false,
+    "writesClaudeConfig": false,
+    "usesExternalCode": false,
+    "requiresNetwork": false,
+    "permissionBypass": false,
+    "requiresTTY": false
+  },
+  "policyRef": "policy.capability.claude.print.analyze",
+  "outputContract": {
+    "format": "json-or-text",
+    "schemaRef": "schemas/analysis-output.schema.json"
+  },
+  "status": "stable"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "approval_example",
+  "createdAt": "2026-06-23T14:00:00.000Z",
+  "expiresAt": "2026-06-23T15:00:00.000Z",
+  "requester": "codex-session-id",
+  "workspaceRoot": "/workspace",
+  "tool": "claude_router_raw",
+  "classification": ["config_mutation", "external_code_or_network"],
+  "command": {
+    "binary": "claude",
+    "argv": ["mcp", "add", "example", "--transport", "stdio"],
+    "argvSha256": "0123456789abcdef"
+  },
+  "scope": {
+    "cwdPolicy": "exact_workspace_root",
+    "allowedSubcommands": ["mcp add"],
+    "allowedFlags": ["--transport"],
+    "allowedHosts": [],
+    "allowedPaths": []
+  },
+  "approvedBy": "user",
+  "approvalText": "Allow one MCP server registration for this workspace.",
+  "singleUse": true,
+  "usedAt": null
+}

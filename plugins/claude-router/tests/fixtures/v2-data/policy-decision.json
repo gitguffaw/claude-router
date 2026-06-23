@@ -1,0 +1,18 @@
+{
+  "id": "decision_example",
+  "policyVersion": 1,
+  "classifierVersion": 1,
+  "createdAt": "2026-06-23T14:00:01.000Z",
+  "intentId": "intent_example",
+  "capabilityId": "capability.claude.print.analyze",
+  "decision": "allow",
+  "riskClasses": ["workspace_read"],
+  "reasonCodes": ["WORKSPACE_READ_ALLOWED", "PERMISSION_MODE_PLAN"],
+  "evidence": {
+    "surfaceSnapshotId": "surface_2_1_185_example",
+    "matchedCommandSpecIds": [],
+    "matchedFlagSpecIds": ["flag.claude.permission-mode"]
+  },
+  "requiredApproval": null,
+  "redactionPolicyId": "redaction.default"
+}

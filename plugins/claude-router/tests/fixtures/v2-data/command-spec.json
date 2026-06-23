@@ -1,0 +1,26 @@
+{
+  "id": "command.claude.mcp.list",
+  "commandPath": ["mcp", "list"],
+  "aliases": [],
+  "summary": "List configured MCP servers.",
+  "interactionKind": "noninteractive",
+  "availability": {
+    "minClaudeVersion": null,
+    "source": "local-help",
+    "snapshotId": "surface_2_1_185_example"
+  },
+  "risk": {
+    "classes": ["safe_read"],
+    "mutability": "none",
+    "writesWorkspace": false,
+    "writesClaudeConfig": false,
+    "usesExternalCode": false,
+    "requiresNetwork": false,
+    "permissionBypass": false,
+    "requiresTTY": false
+  },
+  "flags": [],
+  "positionals": [],
+  "outputs": ["text"],
+  "defaultDecision": "allow"
+}

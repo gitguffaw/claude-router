@@ -1,0 +1,12 @@
+{
+  "id": "redaction.default",
+  "schemaVersion": 1,
+  "patterns": [
+    "Bearer [A-Za-z0-9._-]+",
+    "sk-[A-Za-z0-9_-]+",
+    "gh[pousr]_[A-Za-z0-9_]+"
+  ],
+  "argNames": ["--api-key", "--token", "--header", "--mcp-header"],
+  "envNames": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"],
+  "replacement": "[REDACTED]"
+}

@@ -64,6 +64,36 @@ Ask for Claude Router explicitly, for example:
 Use Claude Router to analyze this repository and identify the riskiest part of the architecture.
 ```
 
+## Using In Codex
+
+Claude Router is installed as an MCP server, not as a slash command, skill, or marketplace plugin.
+
+That means you do not invoke it with `/claude-router`, `$claude-router`, or `@claude-router`. In a Codex chat, ask Codex to use it by name:
+
+```text
+Use Claude Router to check my local setup.
+```
+
+```text
+Use claude-router to analyze this repository. Do not edit files.
+```
+
+```text
+Use the `claude_router_review` MCP tool to review my current diff.
+```
+
+If Codex does not pick the tool automatically, name the exact MCP tool:
+
+```text
+Use `claude_router_setup` and report the result.
+```
+
+```text
+Use `claude_router_exec` to implement the narrowest fix for the failing tests.
+```
+
+If Codex says it cannot find Claude Router after install, start a new Codex session. MCP servers are loaded when a session starts.
+
 ## What Gets Installed
 
 The MCP server exposes these tools to Codex:

@@ -51,6 +51,9 @@ process.exit(2);
   assert.equal(payload.name, "claude-router-test");
   assert.equal(payload.add.status, 0);
   assert.equal(payload.get.status, 0);
+  assert.equal(payload.serverCheck.ok, true);
+  assert.equal(payload.serverCheck.tools.includes("claude_router_setup"), true);
+  assert.equal(payload.serverCheck.toolCount > 0, true);
 
   const calls = fs.readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   assert.deepEqual(calls[0], ["mcp", "add", "claude-router-test", "--", process.execPath, payload.server]);

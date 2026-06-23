@@ -52,6 +52,8 @@ codex mcp get claude-router
 
 You should see a row named `claude-router`. The stored command should use an absolute Node path, for example `/opt/homebrew/bin/node` or `/usr/local/bin/node`. This matters for Codex Desktop because GUI apps often do not inherit your terminal shell `PATH`.
 
+The installer also starts the MCP server directly and checks that it can return the `claude_router_setup` tool. A successful install prints an `MCP server check: ok` line.
+
 This does not appear in `codex plugin list`; that command only lists plugins from configured marketplaces.
 
 Then start a new Codex session. MCP tools are loaded when a session starts, so an already-open Codex thread will not gain the `claude_router_*` tools until you start a new one.

@@ -100,6 +100,62 @@ function commandResult(result) {
   };
 }
 
+function parseJsonLines(stdout) {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+function checkMcpServer() {
+  const input = [
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+    { jsonrpc: "2.0", method: "notifications/initialized", params: {} },
+    { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }
+  ].map((message) => JSON.stringify(message)).join("\n") + "\n";
+
+  const result = spawnSync(NODE, [SERVER], {
+    encoding: "utf8",
+    input,
+    maxBuffer: 20 * 1024 * 1024,
+    timeout: 10000
+  });
+
+  const payload = commandResult(result);
+  if (result.status !== 0 || result.error) {
+    return {
+      ok: false,
+      ...payload,
+      tools: [],
+      toolCount: 0,
+      error: payload.error || `MCP server exited with status ${result.status}`
+    };
+  }
+
+  try {
+    const responses = parseJsonLines(result.stdout);
+    const listResponse = responses.find((message) => message.id === 2);
+    const tools = listResponse?.result?.tools?.map((tool) => tool.name) ?? [];
+    const hasSetupTool = tools.includes("claude_router_setup");
+    return {
+      ok: hasSetupTool,
+      ...payload,
+      tools,
+      toolCount: tools.length,
+      error: hasSetupTool ? null : "MCP server did not return claude_router_setup from tools/list."
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      ...payload,
+      tools: [],
+      toolCount: 0,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
 function fail(message, options = {}, details = {}) {
   if (options.json) {
     process.stderr.write(`${JSON.stringify({ ok: false, error: message, ...details }, null, 2)}\n`);
@@ -155,11 +211,21 @@ if (get.status !== 0 || get.error) {
   fail(`Registered '${options.name}', but verification failed.`, options, { add: commandResult(add), get: commandResult(get) });
 }
 
+const serverCheck = checkMcpServer();
+if (!serverCheck.ok) {
+  fail(`Registered '${options.name}', but the MCP server did not pass its tools/list check.`, options, {
+    add: commandResult(add),
+    get: commandResult(get),
+    serverCheck
+  });
+}
+
 const result = {
   ...payload,
   dryRun: false,
   add: commandResult(add),
   get: commandResult(get),
+  serverCheck,
   nextStep: "Start a new Codex session so the MCP tools are loaded."
 };
 
@@ -172,6 +238,8 @@ if (options.json) {
       "",
       "Codex stored:",
       get.stdout.trimEnd(),
+      "",
+      `MCP server check: ok (${serverCheck.toolCount} tools, including claude_router_setup).`,
       "",
       "Next step: start a new Codex session so the claude_router_* tools are loaded.",
       ""

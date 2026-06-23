@@ -1,0 +1,38 @@
+{
+  "name": "claude-router",
+  "version": "0.1.0",
+  "description": "Route Codex work through the local Claude CLI with policy-backed modes, job tracking, and result handling.",
+  "author": {
+    "name": "Compound"
+  },
+  "homepage": "https://github.com/gitguffaw/claude-router#readme",
+  "repository": "https://github.com/gitguffaw/claude-router",
+  "license": "Apache-2.0",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "codex",
+    "delegation",
+    "review"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Claude Router",
+    "shortDescription": "Delegate Codex work to Claude CLI",
+    "longDescription": "Claude Router lets Codex invoke the local Claude CLI through explicit modes for analysis, planning, execution, review, setup, background jobs, status, results, and cancellation.",
+    "developerName": "Compound",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use Claude to plan this change",
+      "Ask Claude to review my diff",
+      "Run a Claude analysis job in the background"
+    ],
+    "brandColor": "#D97706"
+  },
+  "mcpServers": "./.mcp.json"
+}

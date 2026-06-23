@@ -1,0 +1,622 @@
+{
+  "tool": "claude",
+  "product": "Claude Code",
+  "verified_on": "2026-04-19",
+  "local_version": "2.1.114",
+  "provenance": {
+    "local_commands": [
+      "claude --version",
+      "claude --help",
+      "claude -p --help",
+      "claude agents",
+      "claude mcp list",
+      "claude plugin list",
+      "claude auth status"
+    ],
+    "official_docs": {
+      "model_config": "https://code.claude.com/docs/en/model-config",
+      "permission_modes": "https://code.claude.com/docs/en/permission-modes",
+      "mcp": "https://code.claude.com/docs/en/mcp",
+      "sub_agents": "https://code.claude.com/docs/en/sub-agents",
+      "plugins_reference": "https://code.claude.com/docs/en/plugins-reference",
+      "chrome": "https://code.claude.com/docs/en/chrome",
+      "ultraplan": "https://code.claude.com/docs/en/ultraplan",
+      "context_windows": "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+    },
+    "context7": {
+      "library_id": "/websites/code_claude",
+      "role": "discovery_only_for_claude_docs"
+    },
+    "openai_codex_docs": {
+      "skills": "https://developers.openai.com/codex/skills",
+      "noninteractive": "https://developers.openai.com/codex/noninteractive",
+      "speed": "https://developers.openai.com/codex/speed",
+      "prompting_guide": "https://developers.openai.com/cookbook/examples/gpt-5/codex_prompting_guide"
+    }
+  },
+  "skill_paths": {
+    "skill_root_resolution": "Paths under this object are resolved relative to the skill directory, not the repo cwd.",
+    "print_wrapper": {
+      "path": "scripts/claude_print.py",
+      "path_base": "skill_root"
+    }
+  },
+  "verified_environment": {
+    "logged_in": true,
+    "auth_method": "claude.ai",
+    "api_provider": "firstParty",
+    "subscription_type": "max",
+    "enabled_plugins": [
+      "clangd-lsp@claude-plugins-official",
+      "compound-engineering@compound-engineering-plugin",
+      "superpowers@claude-plugins-official"
+    ],
+    "disabled_plugins": [
+      "linear@claude-plugins-official",
+      "linear@claude-plugins-official"
+    ],
+    "connected_mcp_servers": [
+      "claude.ai Linear",
+      "plugin:compound-engineering:context7"
+    ],
+    "mcp_servers_needing_auth": [
+      "claude.ai Google Drive",
+      "claude.ai Gmail",
+      "claude.ai Google Calendar"
+    ],
+    "built_in_agents": [
+      "Explore",
+      "general-purpose",
+      "Plan",
+      "statusline-setup"
+    ],
+    "research_agents_available": [
+      "compound-engineering:research:best-practices-researcher",
+      "compound-engineering:research:framework-docs-researcher",
+      "compound-engineering:research:git-history-analyzer",
+      "compound-engineering:research:learnings-researcher",
+      "compound-engineering:research:repo-research-analyst"
+    ]
+  },
+  "codex_skill_design": {
+    "progressive_disclosure": true,
+    "focused_one_job": true,
+    "prefer_instructions_over_scripts": true,
+    "use_scripts_when": [
+      "deterministic behavior is needed",
+      "wrapping an external tool is helpful"
+    ],
+    "description_must_define_boundaries": true,
+    "steps_should_be_imperative": true,
+    "steps_should_state_inputs_and_outputs": true
+  },
+  "model_selectors": {
+    "default": {
+      "kind": "special_value",
+      "is_alias": false,
+      "purpose": "Clears any model override and reverts to the runtime default for the current account tier."
+    },
+    "best": {
+      "kind": "alias",
+      "purpose": "Most capable available route.",
+      "current_behavior": "Equivalent to opus."
+    },
+    "sonnet": {
+      "kind": "alias",
+      "purpose": "Latest Sonnet model for daily coding tasks."
+    },
+    "opus": {
+      "kind": "alias",
+      "purpose": "Latest Opus model for complex reasoning tasks."
+    },
+    "haiku": {
+      "kind": "alias",
+      "purpose": "Fast lower-cost route."
+    },
+    "sonnet[1m]": {
+      "kind": "alias",
+      "purpose": "Sonnet with a 1 million token context window when available."
+    },
+    "opus[1m]": {
+      "kind": "alias",
+      "purpose": "Opus with a 1 million token context window when available."
+    },
+    "opusplan": {
+      "kind": "special_alias",
+      "purpose": "Uses opus in plan mode and sonnet in execution."
+    }
+  },
+  "provider_alias_resolution_snapshot": {
+    "anthropic_api": {
+      "opus": "claude-opus-4-7",
+      "sonnet": "claude-sonnet-4-6"
+    },
+    "bedrock_vertex_foundry": {
+      "opus": "claude-opus-4-6",
+      "sonnet": "claude-sonnet-4-5"
+    },
+    "notes": [
+      "Aliases move over time and vary by provider.",
+      "Use full model names or ANTHROPIC_DEFAULT_*_MODEL environment variables when version stability matters."
+    ]
+  },
+  "planning_surfaces": {
+    "local": {
+      "documented_surfaces": [
+        "--permission-mode plan",
+        "/plan",
+        "built-in Plan agent"
+      ],
+      "default_route": "claude --permission-mode plan --model opus <prompt>",
+      "notes": [
+        "Documented as a general local permission mode for read and analysis work.",
+        "Separate availability caveats apply to auto mode and Ultraplan, not to local plan mode itself."
+      ]
+    },
+    "cloud": {
+      "documented_surfaces": [
+        "/ultraplan"
+      ],
+      "requires": [
+        "Claude Code on the web account",
+        "GitHub repository",
+        "Anthropic first-party environment"
+      ]
+    },
+    "notes": [
+      "Plan mode is the documented local planning surface.",
+      "Ultraplan is a Claude Code on the web research-preview feature that requires a Claude Code on the web account and a GitHub repository.",
+      "Model settings are initial selection, not enforcement."
+    ]
+  },
+  "research_surfaces": {
+    "native_web_search_command": false,
+    "default_routes": {
+      "repo_or_docs_exploration": "Use the built-in Explore agent via /agents or --agent Explore when available.",
+      "browser_or_authenticated_web_work": "Use claude --chrome or /chrome only when Chrome integration prerequisites are satisfied.",
+      "mcp_tool_discovery": "Use MCP Tool Search for MCP tools, not for open-web search.",
+      "volatile_product_claims": "Verify against official Anthropic docs."
+    },
+    "runtime_surfaces": [
+      "--chrome",
+      "/chrome",
+      "Chrome integration beta",
+      "MCP Tool Search",
+      "/agents"
+    ],
+    "local_agent_surfaces": [
+      "built-in Explore agent",
+      "installed research agents"
+    ],
+    "external_verification": [
+      "official Anthropic docs verification"
+    ],
+    "browser_requirements": [
+      "Chrome or Edge",
+      "Claude in Chrome extension",
+      "direct Anthropic plan"
+    ],
+    "notes": [
+      "Claude Code docs describe browser automation and web sessions, not a native general-purpose web-search command.",
+      "MCP Tool Search is for discovering MCP tools, not for searching the open web.",
+      "Tool Search is enabled by default on first-party Anthropic hosts."
+    ]
+  },
+  "modes": {
+    "interactive": {
+      "entrypoint": "claude [prompt]",
+      "default": true,
+      "best_for": [
+        "second-brain reasoning",
+        "planning",
+        "browser-backed web work",
+        "live tool use",
+        "slash commands",
+        "session reuse",
+        "ordinary Claude parity"
+      ]
+    },
+    "print": {
+      "entrypoint": "claude -p [prompt]",
+      "best_for": [
+        "automation",
+        "CI",
+        "shell pipelines",
+        "machine-readable output"
+      ],
+      "output_formats": [
+        "text",
+        "json",
+        "stream-json"
+      ],
+      "input_formats": [
+        "text",
+        "stream-json"
+      ],
+      "print_only_flags": [
+        "--fallback-model",
+        "--max-budget-usd",
+        "--no-session-persistence",
+        "--output-format",
+        "--input-format",
+        "--include-hook-events",
+        "--include-partial-messages",
+        "--json-schema",
+        "--replay-user-messages"
+      ]
+    }
+  },
+  "permission_modes": [
+    "acceptEdits",
+    "auto",
+    "bypassPermissions",
+    "default",
+    "dontAsk",
+    "plan"
+  ],
+  "effort_policy": {
+    "available_levels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "model_support": {
+      "opus_4_7": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "opus_4_6": [
+        "low",
+        "medium",
+        "high",
+        "max"
+      ],
+      "sonnet_4_6": [
+        "low",
+        "medium",
+        "high",
+        "max"
+      ]
+    },
+    "fallback_rule": "If the requested level is unsupported, Claude falls back to the highest supported level at or below it.",
+    "session_only_level": "max",
+    "env_override": "CLAUDE_CODE_EFFORT_LEVEL",
+    "one_turn_prompt_hint": "ultrathink"
+  },
+  "high_value_flags": [
+    {
+      "name": "--bare",
+      "category": "reproducibility",
+      "effect": "Disables hooks, LSP, plugin sync, attribution, auto-memory, background prefetches, keychain reads, and CLAUDE.md auto-discovery. Skills still resolve via /skill-name."
+    },
+    {
+      "name": "--permission-mode",
+      "category": "policy",
+      "values": [
+        "acceptEdits",
+        "auto",
+        "bypassPermissions",
+        "default",
+        "dontAsk",
+        "plan"
+      ]
+    },
+    {
+      "name": "--tools",
+      "category": "policy",
+      "effect": "Set built-in tool availability."
+    },
+    {
+      "name": "--allowed-tools",
+      "category": "policy",
+      "effect": "Allow specific tool patterns."
+    },
+    {
+      "name": "--disallowed-tools",
+      "category": "policy",
+      "effect": "Deny specific tool patterns."
+    },
+    {
+      "name": "--settings",
+      "category": "configuration",
+      "effect": "Load additional settings from a JSON file or JSON string."
+    },
+    {
+      "name": "--setting-sources",
+      "category": "configuration",
+      "values": [
+        "user",
+        "project",
+        "local"
+      ]
+    },
+    {
+      "name": "--mcp-config",
+      "category": "configuration",
+      "effect": "Load MCP configuration from JSON files or inline JSON."
+    },
+    {
+      "name": "--strict-mcp-config",
+      "category": "configuration",
+      "effect": "Ignore all MCP configuration except values provided through --mcp-config."
+    },
+    {
+      "name": "--plugin-dir",
+      "category": "extensibility",
+      "effect": "Load one or more plugins for the current session only."
+    },
+    {
+      "name": "--agent",
+      "category": "extensibility",
+      "effect": "Select a configured agent."
+    },
+    {
+      "name": "--agents",
+      "category": "extensibility",
+      "effect": "Define custom agents inline as JSON."
+    },
+    {
+      "name": "--chrome",
+      "category": "browser",
+      "effect": "Enable Claude in Chrome integration."
+    },
+    {
+      "name": "--json-schema",
+      "category": "machine_readability",
+      "effect": "Validate the final print-mode response against a JSON Schema."
+    },
+    {
+      "name": "--output-format",
+      "category": "machine_readability",
+      "values": [
+        "text",
+        "json",
+        "stream-json"
+      ]
+    }
+  ],
+  "top_level_commands": [
+    {
+      "name": "agents",
+      "purpose": "List configured agents"
+    },
+    {
+      "name": "auth",
+      "purpose": "Manage authentication"
+    },
+    {
+      "name": "auto-mode",
+      "purpose": "Inspect auto-mode classifier configuration"
+    },
+    {
+      "name": "doctor",
+      "purpose": "Check auto-updater health"
+    },
+    {
+      "name": "install",
+      "purpose": "Install Claude Code native build"
+    },
+    {
+      "name": "mcp",
+      "purpose": "Configure and manage MCP servers"
+    },
+    {
+      "name": "plugin",
+      "aliases": [
+        "plugins"
+      ],
+      "purpose": "Manage Claude Code plugins"
+    },
+    {
+      "name": "setup-token",
+      "purpose": "Set up a long-lived authentication token"
+    },
+    {
+      "name": "update",
+      "aliases": [
+        "upgrade"
+      ],
+      "purpose": "Check for updates and install if available"
+    }
+  ],
+  "subcommand_examples": {
+    "mcp": [
+      "claude mcp list",
+      "claude mcp get sentry",
+      "claude mcp add --transport http sentry https://mcp.sentry.dev/mcp",
+      "claude mcp add -e API_KEY=xxx my-server -- npx my-mcp-server",
+      "claude mcp serve"
+    ],
+    "plugin": [
+      "claude plugin list",
+      "claude plugin install plugin-name",
+      "claude plugin enable plugin-name",
+      "claude plugin disable plugin-name",
+      "claude plugin validate /path/to/plugin"
+    ],
+    "auth": [
+      "claude auth login",
+      "claude auth status",
+      "claude auth logout"
+    ]
+  },
+  "session_commands": [
+    {
+      "name": "/model",
+      "purpose": "Switch model or [1m] variant."
+    },
+    {
+      "name": "/effort",
+      "purpose": "Adjust reasoning depth."
+    },
+    {
+      "name": "/agents",
+      "purpose": "Inspect and manage agents."
+    },
+    {
+      "name": "/plan",
+      "purpose": "Keep Claude in planning mode for read and analysis work."
+    },
+    {
+      "name": "/ultraplan",
+      "purpose": "Move planning into Claude Code on the web for cloud review."
+    },
+    {
+      "name": "/chrome",
+      "purpose": "Inspect or enable browser automation state."
+    },
+    {
+      "name": "/mcp",
+      "purpose": "Inspect MCP connection and authentication state."
+    },
+    {
+      "name": "/resume",
+      "purpose": "Reopen prior Claude sessions."
+    },
+    {
+      "name": "/plugin",
+      "purpose": "Inspect plugin state when available."
+    },
+    {
+      "name": "/help",
+      "purpose": "Show help and available commands."
+    },
+    {
+      "name": "/hooks",
+      "purpose": "Inspect hook configuration."
+    }
+  ],
+  "config_files": [
+    {
+      "path": "~/.claude/settings.json",
+      "format": "json",
+      "scope": "user",
+      "purpose": "Shared settings between the CLI and the VS Code extension."
+    },
+    {
+      "path": ".mcp.json",
+      "format": "json",
+      "scope": "project",
+      "purpose": "Project-scoped MCP server definitions."
+    },
+    {
+      "path": ".claude/agents/*.md",
+      "format": "markdown",
+      "scope": "project",
+      "purpose": "Project-scoped subagents."
+    },
+    {
+      "path": "~/.claude/agents/*.md",
+      "format": "markdown",
+      "scope": "user",
+      "purpose": "User-scoped subagents."
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "format": "json",
+      "scope": "plugin",
+      "purpose": "Plugin manifest."
+    },
+    {
+      "path": "hooks/hooks.json",
+      "format": "json",
+      "scope": "plugin",
+      "purpose": "Hook configuration."
+    }
+  ],
+  "plugin_layout": {
+    "manifest": ".claude-plugin/plugin.json",
+    "skills": "skills/<SkillName>/SKILL.md",
+    "commands": "commands/*.md",
+    "agents": "agents/*.md",
+    "hooks": "hooks/hooks.json",
+    "settings": "settings.json",
+    "mcp": ".mcp.json",
+    "output_styles": "output-styles/*.md",
+    "bin": "bin/*",
+    "scripts": "scripts/*"
+  },
+  "print_mode_defaults": {
+    "entrypoint": {
+      "runner": "python3",
+      "script_path": "scripts/claude_print.py",
+      "path_base": "skill_root"
+    },
+    "output_format": "json",
+    "prefer_json_schema": true,
+    "prefer_bare_for_reproducibility": false,
+    "prefer_explicit_policy_flags": true
+  },
+  "preferred_entrypoints": {
+    "planning_default": {
+      "command": "claude --permission-mode plan --model opus <prompt>",
+      "kind": "local_plan_mode"
+    },
+    "reasoning_surface_default": "claude --model opus --effort xhigh <prompt>",
+    "max_reasoning_default": "claude --model opus --effort max <prompt>",
+    "long_context_default": "claude --model opus[1m] --effort xhigh <prompt>",
+    "browser_research_default": {
+      "command": "claude --chrome --model sonnet --effort high <prompt>",
+      "requires": [
+        "Chrome or Edge",
+        "Claude in Chrome extension",
+        "direct Anthropic plan"
+      ]
+    },
+    "machine_readable_default": {
+      "runner": "python3",
+      "script_path": "scripts/claude_print.py",
+      "path_base": "skill_root",
+      "args_template": [
+        "<prompt>"
+      ]
+    },
+    "machine_readable_streaming": {
+      "runner": "python3",
+      "script_path": "scripts/claude_print.py",
+      "path_base": "skill_root",
+      "args_template": [
+        "--output-format",
+        "stream-json",
+        "<prompt>"
+      ]
+    },
+    "interactive": "claude",
+    "raw_print_fallback": "claude -p --output-format json <prompt>"
+  },
+  "codex_interop_policy": {
+    "use_when": [
+      "task explicitly requires Anthropic Claude CLI behavior",
+      "task benefits from an independent Claude reasoning or coding pass",
+      "task benefits from Claude planning surfaces",
+      "task benefits from Claude model, effort, or long-context selection",
+      "task benefits from Claude browser-backed research, plugins, MCP, hooks, slash commands, or session management",
+      "deliverable is a Claude CLI run or Claude CLI configuration"
+    ],
+    "avoid_when": [
+      "Codex can complete the task directly without Claude-specific behavior",
+      "user did not ask for Claude and the task is generic coding work"
+    ]
+  },
+  "parity_defaults": {
+    "prefer_interactive_sessions": true,
+    "prefer_ordinary_claude_behavior": true,
+    "default_bare": false,
+    "treat_plugins_mcp_skills_agents_as_live_capabilities": true,
+    "confirm_live_capabilities_before_promise": true,
+    "do_not_claim_native_web_search_command": true
+  },
+  "availability_caveats": [
+    "Documented capability and locally enabled capability are different questions.",
+    "1M context varies by model, provider, and plan.",
+    "Chrome integration requires Chrome or Edge, the Claude in Chrome extension, and a direct Anthropic plan.",
+    "MCP servers may exist but still require authentication.",
+    "Plugin-shipped agents do not support hooks, mcpServers, or permissionMode.",
+    "Tool Search is for MCP tools and is unavailable on Haiku."
+  ]
+}

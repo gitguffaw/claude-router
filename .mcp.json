@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "claude-router": {
+      "command": "node",
+      "args": ["./scripts/claude-router-mcp.mjs"],
+      "cwd": ".",
+      "tool_timeout_sec": 900
+    }
+  }
+}

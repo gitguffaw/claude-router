@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "required": ["summary", "observed_facts", "inferences", "recommendation", "next_action"],
+  "additionalProperties": true,
+  "properties": {
+    "summary": { "type": "string" },
+    "observed_facts": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "inferences": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "recommendation": { "type": "string" },
+    "next_action": { "type": "string" }
+  }
+}

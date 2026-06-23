@@ -133,6 +133,79 @@ Get the latest Claude Router result.
 Cancel the running Claude Router job.
 ```
 
+## Coding And Documentation Workflows
+
+For larger engineering work, ask Claude Router to plan first, then execute one bounded batch at a time. This keeps diffs easier to review and makes failures easier to recover from.
+
+Plan a set of tasks:
+
+```text
+Use Claude Router plan on this repo. Do not edit files.
+
+Break these tasks into implementation batches. For each batch include the goal,
+likely files touched, acceptance criteria, tests to run, and ordering risks.
+
+Tasks:
+1. Replace the legacy adapter path.
+2. Add result pagination.
+3. Update README and architecture docs.
+```
+
+Implement one batch:
+
+```text
+Use Claude Router exec to implement Batch 1 only.
+
+Keep the change scoped. Update tests and docs only when needed for this batch.
+Run the relevant verification commands and summarize what changed.
+```
+
+Ask for documentation work:
+
+```text
+Use Claude Router analyze this repo. Do not edit files.
+
+Check whether README.md, CONTEXT.md, and docs/ match the current implementation.
+Report stale claims, missing setup steps, and places where examples are unclear.
+```
+
+```text
+Use Claude Router exec to update README.md and docs/architecture.md from the analysis.
+
+Keep the docs factual and grounded in the current code. Prefer practical examples
+over marketing language.
+```
+
+Create an architecture document:
+
+```text
+Use Claude Router analyze this repo. Do not edit files.
+
+Produce an architecture outline covering the main components, runtime flow,
+extension points, data and state model, important constraints, and tradeoffs.
+```
+
+```text
+Use Claude Router exec to create docs/architecture.md from that outline.
+
+Include a concise runtime-flow diagram only if it clarifies the design.
+```
+
+Run a multi-agent review when available:
+
+```text
+Use Claude Router ultrareview on my current diff.
+
+Findings first. No auto-fixes. Focus on correctness, architecture, security,
+test gaps, and documentation drift.
+```
+
+Use a normal local review for a faster pass:
+
+```text
+Use Claude Router review on my current diff. Findings first, no auto-fixes.
+```
+
 ## Direct Runtime Usage
 
 You can run the companion runtime directly from a clone when developing or debugging the plugin:

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Codex plugin runtime for policy-backed Claude CLI delegation.",
+  "description": "Codex MCP runtime for policy-backed Claude CLI delegation.",
   "license": "Apache-2.0",
   "scripts": {
     "install:codex": "node scripts/install-codex-mcp.mjs",

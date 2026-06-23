@@ -40,17 +40,23 @@ node scripts/claude-companion.mjs setup
 Register the MCP server with Codex:
 
 ```bash
-CLAUDE_ROUTER_DIR="$(pwd)"
-codex mcp add claude-router -- node "$CLAUDE_ROUTER_DIR/scripts/claude-router-mcp.mjs"
+node scripts/install-codex-mcp.mjs
 ```
 
-Confirm Codex can see it:
+Confirm Codex registered the MCP server:
 
 ```bash
 codex mcp list
+codex mcp get claude-router
 ```
 
-Then start a new Codex session and ask for Claude Router explicitly, for example:
+You should see a row named `claude-router`. The stored command should use an absolute Node path, for example `/opt/homebrew/bin/node` or `/usr/local/bin/node`. This matters for Codex Desktop because GUI apps often do not inherit your terminal shell `PATH`.
+
+This does not appear in `codex plugin list`; that command only lists plugins from configured marketplaces.
+
+Then start a new Codex session. MCP tools are loaded when a session starts, so an already-open Codex thread will not gain the `claude_router_*` tools until you start a new one.
+
+Ask for Claude Router explicitly, for example:
 
 ```text
 Use Claude Router to analyze this repository and identify the riskiest part of the architecture.
@@ -201,9 +207,15 @@ Job state is stored outside the repo by default under `CLAUDE_ROUTER_DATA`, `COD
 
 ## Codex Plugin Packaging
 
-This repo is shaped as a Codex plugin: `.codex-plugin/plugin.json` points at `skills/` and `.mcp.json`.
+This repo includes Codex plugin metadata: `.codex-plugin/plugin.json` points at `skills/` and `.mcp.json`.
 
-The reliable install path today is the MCP registration shown above. Do not run this and expect it to work:
+The reliable install path today is the global MCP registration shown above:
+
+```bash
+node scripts/install-codex-mcp.mjs
+```
+
+Do not run this and expect it to work:
 
 ```bash
 codex plugin marketplace add gitguffaw/claude-router
@@ -217,6 +229,31 @@ codex plugin add claude-router@<marketplace-name>
 ```
 
 ## Troubleshooting
+
+### `claude-router` does not show up in Codex
+
+Check the MCP registry, not the plugin registry:
+
+```bash
+codex mcp list
+codex mcp get claude-router
+```
+
+If there is no `claude-router` entry, register it again from the cloned repo:
+
+```bash
+node scripts/install-codex-mcp.mjs
+```
+
+If `codex mcp get claude-router` shows `command: node` instead of an absolute path, rerun `node scripts/install-codex-mcp.mjs`. A bare `node` command can work in Terminal and still fail when Codex Desktop starts the MCP server.
+
+If `claude-router` appears in `codex mcp list` but the tools are not available in your current Codex thread, start a new Codex session. Existing sessions do not reload newly added MCP servers.
+
+If `codex mcp list` shows `claude-router` but startup still fails, run:
+
+```bash
+node scripts/claude-companion.mjs setup
+```
 
 If setup says `claude not found`, install Claude Code and make sure `claude` is on `PATH`.
 

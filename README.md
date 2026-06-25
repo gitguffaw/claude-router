@@ -1,26 +1,42 @@
-# Claude Router for Codex
+# Claude Router
 
-Claude Router is a Codex plugin bundle that lets Codex delegate work to the local Claude Code CLI. It provides policy-backed modes for setup, analysis, planning, implementation, review, background jobs, result retrieval, and guarded access to installed Claude CLI features.
+Current release: `v2.0.0`
 
-Use it when you want Codex to route a specific task to Claude instead of merely talking about what Claude might do.
+Claude Router lets a host agent delegate work to the local Claude Code CLI through policy-backed modes for setup, analysis, planning, implementation, review, background jobs, result retrieval, and guarded access to installed Claude CLI features.
+
+It ships as:
+
+- a Codex plugin marketplace package under `plugins/claude-router`
+- an AGY plugin/skill registration under `.agy`
+
+Use it when you want Codex or AGY to route a specific task to Claude instead of merely talking about what Claude might do.
 
 ## Requirements
 
 - Node.js 18.18 or newer
-- Codex CLI with plugin support
 - Claude Code CLI installed locally
 - Claude Code already authenticated
+- For Codex: Codex CLI with plugin support
+- For AGY: an AGY build that can install `.agy` plugins or ingest `.agy/skills`
 
-Check the basics:
+Check the shared runtime basics:
 
 ```bash
 node --version
-codex --version
 claude --version
 claude auth status
 ```
 
-## Install
+Check the host you plan to use:
+
+```bash
+codex --version
+agy --version
+```
+
+`node scripts/claude-companion.mjs setup` checks Node, Claude, Claude auth, Claude plugins, and Claude MCP status. It does not require Codex or AGY to be installed.
+
+## Install In Codex
 
 Install Claude Router as a Codex plugin from this marketplace repo:
 
@@ -50,6 +66,43 @@ Run the plugin setup check from a Codex chat after opening a new session:
 
 ```text
 Use Claude Router to check my local setup.
+```
+
+## Install In AGY
+
+Claude Router v2 includes AGY registration files:
+
+- `.agy/plugin.json`
+- `.agy/skills/claude-router/SKILL.md`
+
+If your AGY build supports GitHub plugin installs, install this repository:
+
+```bash
+agy plugin install gitguffaw/claude-router
+```
+
+If your AGY build installs from a local checkout, install this clone instead:
+
+```bash
+git clone https://github.com/gitguffaw/claude-router.git
+agy plugin install ./claude-router
+```
+
+The AGY skill is intentionally scoped to `gitguffaw/claude-router`. It does not install or invoke `codex-router`, and it does not route through `~/.codex/app-server.sock`.
+
+When AGY can attach an MCP server, point it at the repository runtime:
+
+```bash
+node plugins/claude-router/scripts/claude-router-mcp.mjs
+```
+
+When AGY is using skill instructions instead of MCP tools, use the direct runtime commands from `plugins/claude-router`:
+
+```bash
+cd plugins/claude-router
+node scripts/claude-companion.mjs setup
+node scripts/claude-companion.mjs analyze --cwd /path/to/project "map the architecture"
+node scripts/claude-companion.mjs plan --cwd /path/to/project "plan the change"
 ```
 
 ## Using In Codex
@@ -228,27 +281,6 @@ node scripts/claude-companion.mjs plan --cwd /path/to/project --chrome "research
 node scripts/claude-companion.mjs exec --cwd /path/to/project --allowed-tools "Read,Edit" "apply the requested fix"
 ```
 
-## Antigravity / AGY
-
-This repository also ships a root `.agy/plugin.json` and `.agy/skills/claude-router/SKILL.md` so AGY can identify Claude Router as a Claude-only router.
-
-The AGY skill is intentionally scoped to `gitguffaw/claude-router`. It does not install or invoke `codex-router`, and it does not route through `~/.codex/app-server.sock`.
-
-If AGY can attach an MCP server for this plugin, point it at the repository runtime:
-
-```bash
-node plugins/claude-router/scripts/claude-router-mcp.mjs
-```
-
-If AGY is using skill instructions instead of MCP tools, use the direct runtime commands from `plugins/claude-router`:
-
-```bash
-cd plugins/claude-router
-node scripts/claude-companion.mjs setup
-node scripts/claude-companion.mjs analyze --cwd /path/to/project "map the architecture"
-node scripts/claude-companion.mjs plan --cwd /path/to/project "plan the change"
-```
-
 ## Full Claude CLI Access
 
 Claude Router has curated tools for common workflows, plus `help` and `raw` for Claude features that do not need a bespoke plugin tool.
@@ -340,7 +372,7 @@ Run tests from the repo root:
 npm test
 ```
 
-Validate the plugin manifest:
+Validate the Codex plugin manifest and cross-host version alignment:
 
 ```bash
 npm run validate

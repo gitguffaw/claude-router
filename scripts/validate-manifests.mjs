@@ -8,6 +8,7 @@ const packagePath = path.join(root, "package.json");
 const agyManifestPath = path.join(root, ".agy", "plugin.json");
 const agySkillPath = path.join(root, ".agy", "skills", "claude-router", "SKILL.md");
 const codexManifestPath = path.join(root, "plugins", "claude-router", ".codex-plugin", "plugin.json");
+const readmePath = path.join(root, "README.md");
 const runtimePath = path.join(root, "plugins", "claude-router", "scripts", "claude-companion.mjs");
 const mcpPath = path.join(root, "plugins", "claude-router", "scripts", "claude-router-mcp.mjs");
 
@@ -41,6 +42,7 @@ for (const [file, label] of [
   [agyManifestPath, "AGY manifest"],
   [agySkillPath, "AGY claude-router skill"],
   [codexManifestPath, "Codex plugin manifest"],
+  [readmePath, "README"],
   [runtimePath, "Claude Router runtime"],
   [mcpPath, "Claude Router MCP server"]
 ]) {
@@ -81,6 +83,13 @@ const agySkill = fs.readFileSync(agySkillPath, "utf8");
 for (const required of ["name: claude-router", "claude-companion.mjs", "claude-router-mcp.mjs"]) {
   if (!agySkill.includes(required)) {
     fail(`AGY skill is missing required text: ${required}`);
+  }
+}
+
+const readme = fs.readFileSync(readmePath, "utf8");
+for (const required of ["agy plugin validate .agy", "agy plugin install .agy", "agy plugin uninstall claude-router"]) {
+  if (!readme.includes(required)) {
+    fail(`README is missing required AGY documentation: ${required}`);
   }
 }
 

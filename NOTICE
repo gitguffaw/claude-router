@@ -1,6 +1,6 @@
 Claude Router
 Copyright 2026 Compound
 
-This project includes implementation patterns adapted from the local
-codex-router plugin runtime. Claude, Claude Code, Anthropic, OpenAI,
+This project includes implementation patterns adapted from local
+router plugin runtime work. Claude, Claude Code, Anthropic, OpenAI,
 ChatGPT, and Codex are trademarks of their respective owners.

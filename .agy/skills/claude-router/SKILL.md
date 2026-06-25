@@ -14,6 +14,23 @@ Use this skill when AGY should delegate work to the local Anthropic `claude` CLI
 - Do not route through `~/.codex/app-server.sock`; that socket is for Codex-hosted workflows, not Claude Router.
 - Claude Router invokes the local `claude` command through the runtime under `plugins/claude-router`.
 
+## AGY Plugin Commands
+
+When installing or validating this plugin through the AGY CLI, use `.agy` as the plugin root:
+
+```bash
+agy plugin validate .agy
+agy plugin install .agy
+agy plugin list
+agy plugin enable claude-router
+agy plugin disable claude-router
+agy plugin uninstall claude-router
+```
+
+Do not pass the repository root to `agy plugin validate` or `agy plugin install`; AGY expects `plugin.json` at the root of the path it is given.
+
+AGY imports this skill registration from `.agy`. The runnable Claude Router scripts live in the surrounding repository checkout under `plugins/claude-router`, so keep or locate that checkout before invoking direct runtime commands.
+
 ## Runtime
 
 From the repository root, use the companion runtime:

@@ -75,20 +75,42 @@ Claude Router v2 includes AGY registration files:
 - `.agy/plugin.json`
 - `.agy/skills/claude-router/SKILL.md`
 
-If your AGY build supports GitHub plugin installs, install this repository:
+The AGY plugin root is `.agy`, not the repository root. Validate it before installing:
 
 ```bash
-agy plugin install gitguffaw/claude-router
+agy plugin validate .agy
 ```
 
-If your AGY build installs from a local checkout, install this clone instead:
+Install from a local checkout:
 
 ```bash
 git clone https://github.com/gitguffaw/claude-router.git
-agy plugin install ./claude-router
+cd claude-router
+agy plugin install .agy
 ```
 
-The AGY skill is intentionally scoped to `gitguffaw/claude-router`. It does not install or invoke `codex-router`, and it does not route through `~/.codex/app-server.sock`.
+Keep the checkout if you want AGY to use the direct runtime commands documented below; AGY imports the skill registration from `.agy`, while the runtime scripts live under `plugins/claude-router`.
+
+Confirm AGY imported it:
+
+```bash
+agy plugin list
+```
+
+Enable or disable the AGY plugin:
+
+```bash
+agy plugin enable claude-router
+agy plugin disable claude-router
+```
+
+Uninstall the AGY plugin:
+
+```bash
+agy plugin uninstall claude-router
+```
+
+The AGY skill is intentionally scoped to `claude-router`. It does not install or invoke `codex-router`, and it does not route through `~/.codex/app-server.sock`.
 
 When AGY can attach an MCP server, point it at the repository runtime:
 
@@ -330,6 +352,8 @@ Read-only modes snapshot git status before and after Claude runs. If Claude chan
 
 ## Uninstall
 
+### Uninstall From Codex
+
 Remove the plugin:
 
 ```bash
@@ -348,6 +372,28 @@ If you previously followed the old standalone MCP instructions, remove that lega
 codex mcp remove claude-router
 ```
 
+### Uninstall From AGY
+
+Disable the AGY plugin without removing it:
+
+```bash
+agy plugin disable claude-router
+```
+
+Remove the AGY plugin registration:
+
+```bash
+agy plugin uninstall claude-router
+```
+
+Confirm it is gone:
+
+```bash
+agy plugin list
+```
+
+This removes AGY's imported plugin registration. It does not delete your local `claude-router` checkout.
+
 ## Troubleshooting
 
 If setup says `claude not found`, install Claude Code and make sure `claude` is on `PATH`.
@@ -363,6 +409,20 @@ If Claude runs against the wrong project, pass `cwd` through the tool request or
 If `raw` refuses to run a command, it probably detected a Claude config mutation or dangerous permission mode. Use `--allow-mutating` or `--allow-dangerous` only when that is the explicit intent.
 
 If Codex says it cannot find Claude Router after install, start a new Codex session.
+
+If AGY says `missing plugin.json`, pass the `.agy` directory to AGY instead of the repository root:
+
+```bash
+agy plugin validate .agy
+agy plugin install .agy
+```
+
+If AGY cannot find Claude Router after install, check the imported plugin list and enable it:
+
+```bash
+agy plugin list
+agy plugin enable claude-router
+```
 
 ## Development
 

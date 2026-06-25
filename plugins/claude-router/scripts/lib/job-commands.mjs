@@ -33,8 +33,8 @@ export async function handleStatus(cwd, { reference = "", json = false, wait = f
   output(json ? { jobs } : renderStatusReport(jobs), json);
 }
 
-export function handleResult(cwd, { reference = "", json = false } = {}) {
-  const job = readFullJob(cwd, reference);
+export async function handleResult(cwd, { reference = "", json = false, wait = false, timeoutMs = null, pollIntervalMs = null } = {}) {
+  const job = wait ? await waitForJob(cwd, reference, { timeoutMs, pollIntervalMs }) : readFullJob(cwd, reference);
   output(json ? job : renderStoredJobResult(job), json);
 }
 

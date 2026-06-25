@@ -124,6 +124,25 @@ test("background job can be waited for", () => {
   assert.equal(statusPayload.waitTimedOut, false);
 });
 
+test("background result can be waited for", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const env = buildEnv(bin, data);
+  const started = run("node", [SCRIPT, "analyze", "--json", "--background", "SLEEP_FAST"], { cwd: repo, env });
+  assert.equal(started.status, 0, started.stderr);
+  const startPayload = JSON.parse(started.stdout);
+  assert.equal(startPayload.status, "running");
+  const result = run("node", [SCRIPT, "result", "--json", "--wait", "--timeout-ms", "5000", startPayload.id], { cwd: repo, env });
+  assert.equal(result.status, 0, result.stderr);
+  const resultPayload = JSON.parse(result.stdout);
+  assert.equal(resultPayload.status, "completed");
+  assert.equal(resultPayload.waitTimedOut, false);
+  assert.equal(resultPayload.result?.parsedOutput?.result, "Slept");
+});
+
 test("background job can be cancelled", () => {
   const repo = makeTempDir();
   const bin = makeTempDir();

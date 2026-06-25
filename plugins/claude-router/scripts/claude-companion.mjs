@@ -357,8 +357,14 @@ async function main() {
       pollIntervalMs: options["poll-interval-ms"]
     });
   } else if (command === "result") {
-    const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
-    handleResult(resolveWorkspaceRoot(resolveCwd(options)), { reference: positionals[0] ?? "", json: Boolean(options.json) });
+    const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd", "timeout-ms", "poll-interval-ms"], booleanOptions: ["json", "wait"] });
+    await handleResult(resolveWorkspaceRoot(resolveCwd(options)), {
+      reference: positionals[0] ?? "",
+      json: Boolean(options.json),
+      wait: Boolean(options.wait),
+      timeoutMs: options["timeout-ms"],
+      pollIntervalMs: options["poll-interval-ms"]
+    });
   } else if (command === "cancel") {
     const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
     handleCancel(resolveWorkspaceRoot(resolveCwd(options)), { reference: positionals[0] ?? "", json: Boolean(options.json) });

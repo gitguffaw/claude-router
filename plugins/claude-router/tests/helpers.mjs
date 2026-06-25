@@ -58,7 +58,7 @@ if (args.includes("-p")) {
   if (prompt.includes("SLEEP")) {
     setTimeout(() => {
       console.log(JSON.stringify({ result: "Slept", session_id: "00000000-0000-4000-8000-000000000000" }));
-    }, 5000);
+    }, prompt.includes("SLEEP_FAST") ? 250 : 5000);
     return;
   }
   if (prompt.includes("CHANGE_FILE")) {

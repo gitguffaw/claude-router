@@ -228,6 +228,27 @@ node scripts/claude-companion.mjs plan --cwd /path/to/project --chrome "research
 node scripts/claude-companion.mjs exec --cwd /path/to/project --allowed-tools "Read,Edit" "apply the requested fix"
 ```
 
+## Antigravity / AGY
+
+This repository also ships a root `.agy/plugin.json` and `.agy/skills/claude-router/SKILL.md` so AGY can identify Claude Router as a Claude-only router.
+
+The AGY skill is intentionally scoped to `gitguffaw/claude-router`. It does not install or invoke `codex-router`, and it does not route through `~/.codex/app-server.sock`.
+
+If AGY can attach an MCP server for this plugin, point it at the repository runtime:
+
+```bash
+node plugins/claude-router/scripts/claude-router-mcp.mjs
+```
+
+If AGY is using skill instructions instead of MCP tools, use the direct runtime commands from `plugins/claude-router`:
+
+```bash
+cd plugins/claude-router
+node scripts/claude-companion.mjs setup
+node scripts/claude-companion.mjs analyze --cwd /path/to/project "map the architecture"
+node scripts/claude-companion.mjs plan --cwd /path/to/project "plan the change"
+```
+
 ## Full Claude CLI Access
 
 Claude Router has curated tools for common workflows, plus `help` and `raw` for Claude features that do not need a bespoke plugin tool.
@@ -322,7 +343,7 @@ npm test
 Validate the plugin manifest:
 
 ```bash
-npm run validate:plugin
+npm run validate
 ```
 
 ## License

@@ -7,7 +7,9 @@
   "license": "Apache-2.0",
   "scripts": {
     "test": "cd plugins/claude-router && node --test tests/*.test.mjs",
-    "validate:plugin": "cd plugins/claude-router && node scripts/validate-plugin.mjs"
+    "validate:plugin": "cd plugins/claude-router && node scripts/validate-plugin.mjs",
+    "validate:agy": "node scripts/validate-agy.mjs",
+    "validate": "npm run validate:plugin && npm run validate:agy"
   },
   "engines": {
     "node": ">=18.18.0"

@@ -85,11 +85,27 @@ export function renderStoredJobResult(job) {
     return "Claude Router job not found.\n";
   }
   const lines = [`# Claude Job Result ${job.id}`, "", `Status: ${job.status}`];
+  if (job.phase) {
+    lines.push(`Phase: ${job.phase}`);
+  }
+  if (job.waitTimedOut) {
+    lines.push("Wait: timed out before the job completed");
+  }
   if (job.contextPack?.id) {
     lines.push(`Context pack: ${job.contextPack.id}`);
   }
   if (job.claudeSessionId) {
     lines.push(`Resume in Claude: claude --resume ${job.claudeSessionId}`);
+  }
+  if (isActiveJobStatus(job.status)) {
+    lines.push("", "The job is still running. Poll again with `result --wait`, inspect `status`, or cancel it if it appears stuck.");
+    if (job.logPreview?.length) {
+      lines.push("", "Log preview:");
+      for (const line of job.logPreview) {
+        lines.push(`- ${line}`);
+      }
+    }
+    return `${lines.join("\n").trimEnd()}\n`;
   }
   lines.push("", job.rendered || JSON.stringify(job.result ?? {}, null, 2));
   return `${lines.join("\n").trimEnd()}\n`;

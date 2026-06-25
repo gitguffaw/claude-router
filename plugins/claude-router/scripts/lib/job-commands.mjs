@@ -2,7 +2,7 @@ import { terminateProcessTree } from "./process.mjs";
 import { readFullJob, resolveJob, sortJobsNewestFirst } from "./job-control.mjs";
 import { renderJobStatus, renderStatusReport, renderStoredJobResult } from "./render.mjs";
 import { listJobs, upsertJob, writeJobFile } from "./state.mjs";
-import { isActiveJobStatus } from "./tracked-jobs.mjs";
+import { isActiveJobStatus, readLogPreview } from "./tracked-jobs.mjs";
 
 function output(value, asJson) {
   process.stdout.write(asJson ? `${JSON.stringify(value, null, 2)}\n` : value);
@@ -17,7 +17,19 @@ async function waitForJob(cwd, reference, options = {}) {
     await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, Math.max(0, deadline - Date.now()))));
     job = readFullJob(cwd, reference);
   }
-  return { ...job, waitTimedOut: isActiveJobStatus(job.status) };
+  return withJobDiagnostics({ ...job, waitTimedOut: isActiveJobStatus(job.status) });
+}
+
+function withJobDiagnostics(job) {
+  if (!job) {
+    return job;
+  }
+  const logPreview = readLogPreview(job.logFile, 12);
+  return {
+    ...job,
+    active: isActiveJobStatus(job.status),
+    ...(logPreview.length ? { logPreview } : {})
+  };
 }
 
 export async function handleStatus(cwd, { reference = "", json = false, wait = false, timeoutMs = null, pollIntervalMs = null } = {}) {
@@ -33,8 +45,8 @@ export async function handleStatus(cwd, { reference = "", json = false, wait = f
   output(json ? { jobs } : renderStatusReport(jobs), json);
 }
 
-export function handleResult(cwd, { reference = "", json = false } = {}) {
-  const job = readFullJob(cwd, reference);
+export async function handleResult(cwd, { reference = "", json = false, wait = false, timeoutMs = null, pollIntervalMs = null } = {}) {
+  const job = wait ? await waitForJob(cwd, reference, { timeoutMs, pollIntervalMs }) : withJobDiagnostics(readFullJob(cwd, reference));
   output(json ? job : renderStoredJobResult(job), json);
 }
 

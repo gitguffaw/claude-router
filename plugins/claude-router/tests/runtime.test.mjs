@@ -124,6 +124,44 @@ test("background job can be waited for", () => {
   assert.equal(statusPayload.waitTimedOut, false);
 });
 
+test("background job result wait returns output after completion", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const env = buildEnv(bin, data);
+  const started = run("node", [SCRIPT, "analyze", "--json", "--background", "background task"], { cwd: repo, env });
+  assert.equal(started.status, 0, started.stderr);
+  const startPayload = JSON.parse(started.stdout);
+  const result = run("node", [SCRIPT, "result", "--json", "--wait", "--timeout-ms", "5000", startPayload.id], { cwd: repo, env });
+  assert.equal(result.status, 0, result.stderr);
+  const resultPayload = JSON.parse(result.stdout);
+  assert.equal(resultPayload.status, "completed");
+  assert.equal(resultPayload.waitTimedOut, false);
+  assert.match(resultPayload.rendered, /Handled:/);
+});
+
+test("background job result wait reports timeout and log preview", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const env = buildEnv(bin, data);
+  const started = run("node", [SCRIPT, "analyze", "--json", "--background", "SLEEP"], { cwd: repo, env });
+  assert.equal(started.status, 0, started.stderr);
+  const startPayload = JSON.parse(started.stdout);
+  const result = run("node", [SCRIPT, "result", "--json", "--wait", "--timeout-ms", "100", startPayload.id], { cwd: repo, env });
+  assert.equal(result.status, 0, result.stderr);
+  const resultPayload = JSON.parse(result.stdout);
+  assert.equal(resultPayload.status, "running");
+  assert.equal(resultPayload.waitTimedOut, true);
+  assert.equal(resultPayload.active, true);
+  assert.ok(resultPayload.logPreview.some((line) => line.includes("Invoking Claude analyze.")));
+  run("node", [SCRIPT, "cancel", "--json", startPayload.id], { cwd: repo, env });
+});
+
 test("background job can be cancelled", () => {
   const repo = makeTempDir();
   const bin = makeTempDir();

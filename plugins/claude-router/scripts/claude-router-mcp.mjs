@@ -206,6 +206,19 @@ function callTool(name, input = {}) {
     if (input.job_id) {
       args.push(input.job_id);
     }
+  } else if (tool.command === "result") {
+    if (input.wait) {
+      args.push("--wait");
+    }
+    if (input.timeout_ms) {
+      args.push("--timeout-ms", String(input.timeout_ms));
+    }
+    if (input.poll_interval_ms) {
+      args.push("--poll-interval-ms", String(input.poll_interval_ms));
+    }
+    if (input.job_id) {
+      args.push(input.job_id);
+    }
   } else if (tool.command === "ultrareview") {
     if (input.timeout) {
       args.push("--timeout", String(input.timeout));

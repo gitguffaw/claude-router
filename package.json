@@ -1,6 +1,6 @@
 {
   "name": "@compound/claude-router-marketplace",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "Codex plugin marketplace for policy-backed Claude CLI delegation.",
@@ -8,8 +8,8 @@
   "scripts": {
     "test": "cd plugins/claude-router && node --test tests/*.test.mjs",
     "validate:plugin": "cd plugins/claude-router && node scripts/validate-plugin.mjs",
-    "validate:agy": "node scripts/validate-agy.mjs",
-    "validate": "npm run validate:plugin && npm run validate:agy"
+    "validate:manifests": "node scripts/validate-manifests.mjs",
+    "validate": "npm run validate:plugin && npm run validate:manifests"
   },
   "engines": {
     "node": ">=18.18.0"

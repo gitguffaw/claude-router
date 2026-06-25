@@ -5,7 +5,7 @@ date: 2026-06-22
 
 # Use Claude print mode as the first reliable runtime
 
-Claude Router V1 uses `claude -p` for controllable jobs. Interactive TUI automation is deferred because background execution, cancellation, structured output, and result storage are easier to make reliable through print mode.
+The initial Claude Router runtime uses `claude -p` for controllable jobs. Interactive TUI automation is deferred because background execution, cancellation, structured output, and result storage are easier to make reliable through print mode.
 
 ## Consequences
 

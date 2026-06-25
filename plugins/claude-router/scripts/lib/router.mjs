@@ -43,7 +43,7 @@ export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = nul
     throw new Error(`Unsupported Claude Router mode "${mode}".`);
   }
   if (options.search || options.webSearch) {
-    throw new Error("Claude Router V1 does not expose a native generic web-search mode. Use --chrome for browser work or ask for MCP/docs verification.");
+    throw new Error("Claude Router does not expose a native generic web-search mode. Use --chrome for browser work or ask for MCP/docs verification.");
   }
   rejectDangerous(options);
   requirePrompt(prompt);

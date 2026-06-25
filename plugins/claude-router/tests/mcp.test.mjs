@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -7,6 +8,7 @@ import { buildEnv, installFakeClaude, makeTempDir } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = path.join(ROOT, "scripts", "claude-router-mcp.mjs");
+const PLUGIN = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
 
 function request(proc, message) {
   return new Promise((resolve) => {
@@ -30,6 +32,7 @@ test("mcp server lists tools", async () => {
   try {
     const init = await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     assert.equal(init.result.serverInfo.name, "claude-router");
+    assert.equal(init.result.serverInfo.version, PLUGIN.version);
     const list = await request(proc, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
     assert.ok(list.result.tools.some((tool) => tool.name === "claude_router_setup"));
     assert.ok(list.result.tools.some((tool) => tool.name === "claude_router_surface"));

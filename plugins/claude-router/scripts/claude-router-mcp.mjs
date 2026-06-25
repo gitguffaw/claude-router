@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
@@ -7,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const COMPANION = path.join(ROOT, "scripts", "claude-companion.mjs");
+const PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8")).version;
 
 const tools = [
   { name: "claude_router_setup", description: "Check local Claude CLI setup.", command: "setup" },
@@ -237,7 +239,7 @@ function send(message) {
 
 function handleRequest(message) {
   if (message.method === "initialize") {
-    send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "claude-router", version: "1.0.0" } } });
+    send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "claude-router", version: PLUGIN_VERSION } } });
     return;
   }
   if (message.method === "tools/list") {

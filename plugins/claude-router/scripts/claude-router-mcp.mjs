@@ -22,7 +22,8 @@ const tools = [
   { name: "claude_router_ultrareview", description: "Run Claude ultrareview.", command: "ultrareview" },
   { name: "claude_router_status", description: "Show Claude Router jobs.", command: "status" },
   { name: "claude_router_result", description: "Show Claude Router job result.", command: "result" },
-  { name: "claude_router_cancel", description: "Cancel a Claude Router job.", command: "cancel" }
+  { name: "claude_router_cancel", description: "Cancel a Claude Router job.", command: "cancel" },
+  { name: "claude_router_models", description: "Return the catalog of available Claude models, effort levels, and modifier flags", command: "models" }
 ];
 
 const ROUTED_COMMANDS = new Set(["analyze", "plan", "exec", "review"]);
@@ -125,6 +126,20 @@ function schemaFor(tool) {
     resume: { type: "string" },
     session_id: { type: "string" }
   };
+  if (tool.command === "models") {
+    return {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        capability: {
+          type: "string",
+          enum: ["long_context", "ultrathink", "chrome"],
+          description: "Filter models to those supporting a specific capability."
+        }
+      },
+      required: []
+    };
+  }
   if (tool.prompt) {
     properties.prompt = { type: "string" };
   }
@@ -214,6 +229,10 @@ function callTool(name, input = {}) {
     }
     if (input.target) {
       args.push(String(input.target));
+    }
+  } else if (tool.command === "models") {
+    if (input.capability) {
+      args.push("--capability", input.capability);
     }
   } else if (input.job_id) {
     args.push(input.job_id);

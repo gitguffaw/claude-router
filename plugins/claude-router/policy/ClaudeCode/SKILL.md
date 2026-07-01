@@ -14,7 +14,7 @@ Operate Anthropic's local `claude` CLI from Codex as a real second reasoning and
 - Use when the task benefits from Claude planning surfaces such as `--permission-mode plan`, built-in `Plan`, or `/ultraplan`.
 - Use when the task benefits from Claude-specific plugins, MCP tools, hooks, slash commands, subagents, or session memory.
 - Use when browser-backed web work, authenticated website access, or Claude-specific research tooling matters.
-- Use when model choice, effort level, or long-context selection matters.
+- Use when model choice, effort level, permission mode, or long-context selection matters. Use `claude_router_models` to discover available options.
 - Use print mode only when the deliverable is structured Claude output for another tool or script.
 - Do not use only to duplicate trivial work Codex can finish directly without any Claude-specific advantage.
 
@@ -49,6 +49,13 @@ Operate Anthropic's local `claude` CLI from Codex as a real second reasoning and
 - `haiku`: fast lower-cost route. Do not assume it supports every higher-end feature.
 - `opusplan`: uses `opus` in plan mode and `sonnet` in execution. Useful when the work splits cleanly into planning and execution. Do not assume 1M planning context here.
 - Use full model names or pinned `ANTHROPIC_DEFAULT_*_MODEL` environment variables when version stability matters more than convenience aliases.
+- Use `claude_router_models` to discover the current model catalog, including tier capabilities, effort levels, permission modes, and modifier flags. The catalog is static curated data, not a live probe. It returns:
+  - `tiers`: haiku, sonnet, opus — with context window, long-context support, ultrathink support, and cost tier
+  - `effort_levels`: low, medium, high, xhigh, max — with token budgets
+  - `modifiers`: `--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare` — with tier compatibility
+  - `permission_modes`: default (interactive), plan (read-only), bypassPermissions (requires `--allow-dangerous`)
+  - `presets`: `--best` (resolves to opus)
+  - Pass `capability` (long_context, ultrathink, chrome) to filter tiers. Unknown values are rejected.
 
 ## Effort Policy
 

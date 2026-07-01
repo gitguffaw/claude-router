@@ -2,7 +2,7 @@
 
 Current release: `v2.0.0`
 
-Claude Router lets a host agent delegate work to the local Claude Code CLI through policy-backed modes for setup, analysis, planning, implementation, review, background jobs, result retrieval, and guarded access to installed Claude CLI features.
+Claude Router lets a host agent delegate work to the local Claude Code CLI through policy-backed modes for setup, analysis, planning, implementation, review, model and capability discovery, background jobs, result retrieval, and guarded access to installed Claude CLI features.
 
 It ships as:
 
@@ -165,6 +165,7 @@ The plugin exposes these Codex tools:
 - `claude_router_ultrareview`: run Claude's cloud-hosted `ultrareview`
 - `claude_router_status`: list or inspect jobs
 - `claude_router_result`: fetch a stored job result
+- `claude_router_models`: return the catalog of available Claude models, effort levels, permission modes, and modifier flags
 - `claude_router_cancel`: cancel a background job
 - `claude_router_raw`: run raw Claude CLI args with guardrails
 
@@ -207,6 +208,44 @@ Show Claude Router job status.
 Get the latest Claude Router result.
 Cancel the running Claude Router job.
 ```
+
+Ask which models and effort levels are available:
+
+```text
+Use Claude Router models to show available Claude models and effort levels.
+```
+
+Filter to models that support a capability:
+
+```text
+Use Claude Router models filtered to ultrathink support.
+```
+
+## Model Catalog Reference
+
+The `claude_router_models` tool and `models` companion mode return a static catalog describing Claude controls. The catalog is curated data, not a live probe of account or binary capabilities.
+
+### Catalog Sections
+
+- `tiers` — model tiers (haiku, sonnet, opus) with context windows, long-context support, ultrathink support, and cost tier
+- `effort_levels` — reasoning depth controls (low, medium, high, xhigh, max) with token budgets
+- `modifiers` — boolean session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) with tier compatibility
+- `permission_modes` — session permission controls (default, plan, bypassPermissions)
+- `presets` — shortcut flags (`--best` resolves to opus)
+
+### Permission Modes
+
+| Mode | Flag Value | Description | Requires `--allow-dangerous` |
+| --- | --- | --- | --- |
+| default | `default` | Interactive approval for writes and commands | No |
+| plan | `plan` | Read-only; no file writes or command execution | No |
+| bypassPermissions | `bypassPermissions` | Skip all permission checks | Yes |
+
+### Capability Filtering
+
+Pass `capability` to filter tiers. Valid values: `long_context`, `ultrathink`, `chrome`. Unknown values are rejected.
+
+For the full rendered catalog, run `node scripts/claude-companion.mjs models` from the plugin directory.
 
 ## Coding And Documentation Workflows
 
@@ -292,6 +331,8 @@ node scripts/claude-companion.mjs analyze --cwd /path/to/project "map the archit
 node scripts/claude-companion.mjs plan --cwd /path/to/project --background "plan the migration"
 node scripts/claude-companion.mjs status --cwd /path/to/project
 node scripts/claude-companion.mjs result --cwd /path/to/project <job-id>
+node scripts/claude-companion.mjs models
+node scripts/claude-companion.mjs models --capability ultrathink
 node scripts/claude-companion.mjs cancel --cwd /path/to/project <job-id>
 ```
 
@@ -346,6 +387,7 @@ node scripts/claude-companion.mjs raw --allow-dangerous -- -p --permission-mode 
 | `ultrareview` | No | Claude cloud-hosted multi-agent review |
 | `surface` | No | Installed Claude version and top-level help |
 | `help` | No | Help for a Claude command path |
+| `models` | No | Available Claude models, effort levels, permission modes, and modifier flags |
 | `raw` | Depends | Exact Claude CLI args with mutation and danger guardrails |
 
 Read-only modes snapshot git status before and after Claude runs. If Claude changes files during `analyze`, `plan`, or `review`, the job is marked `completed-with-warnings`.

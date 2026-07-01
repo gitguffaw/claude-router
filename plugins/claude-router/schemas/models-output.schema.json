@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gitguffaw/claude-router/schemas/models-output.schema.json",
+  "title": "Claude Router Models Catalog",
+  "type": "object",
+  "required": ["catalog_version", "tiers", "effort_levels", "modifiers", "permission_modes", "presets"],
+  "additionalProperties": false,
+  "properties": {
+    "catalog_version": {
+      "type": "string",
+      "description": "Semver of the catalog data."
+    },
+    "tiers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ModelTier" }
+    },
+    "effort_levels": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/EffortLevel" }
+    },
+    "modifiers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Modifier" }
+    },
+    "permission_modes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PermissionMode" }
+    },
+    "presets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Preset" }
+    }
+  },
+  "$defs": {
+    "ModelTier": {
+      "type": "object",
+      "required": ["id", "flag", "display_name", "context_window", "long_context_window", "supports_ultrathink", "supports_long_context", "cost_tier", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "flag": { "type": "string", "description": "CLI flag name, e.g. --haiku" },
+        "display_name": { "type": "string" },
+        "context_window": { "type": "string", "description": "Human-readable base context size" },
+        "long_context_window": { "type": ["string", "null"], "description": "Context size with --long-context, null if unsupported" },
+        "supports_ultrathink": { "type": "boolean" },
+        "supports_long_context": { "type": "boolean" },
+        "cost_tier": { "type": "string", "enum": ["low", "medium", "high"] },
+        "notes": { "type": "string" }
+      }
+    },
+    "EffortLevel": {
+      "type": "object",
+      "required": ["id", "flag_value", "description", "token_budget", "recommended_for"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "flag_value": { "type": "string", "description": "Value passed to --effort" },
+        "description": { "type": "string" },
+        "token_budget": { "type": "string", "description": "Relative token budget hint" },
+        "recommended_for": { "type": "string" }
+      }
+    },
+    "Modifier": {
+      "type": "object",
+      "required": ["id", "flag", "type", "description", "compatible_tiers", "conflicts_with", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "flag": { "type": "string" },
+        "type": { "type": "string", "enum": ["boolean", "value"] },
+        "description": { "type": "string" },
+        "compatible_tiers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tier ids this modifier works with. Empty array means all."
+        },
+        "conflicts_with": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Modifier ids that cannot be combined with this one."
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "PermissionMode": {
+      "type": "object",
+      "required": ["id", "flag_value", "description", "requires_allow_dangerous", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "flag_value": { "type": "string", "description": "Value passed to --permission-mode" },
+        "description": { "type": "string" },
+        "requires_allow_dangerous": { "type": "boolean", "description": "Whether this mode requires --allow-dangerous to activate" },
+        "notes": { "type": "string" }
+      }
+    },
+    "Preset": {
+      "type": "object",
+      "required": ["id", "flag", "resolves_to", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "flag": { "type": "string" },
+        "resolves_to": {
+          "type": "object",
+          "required": ["tier", "effort", "modifiers"],
+          "additionalProperties": false,
+          "properties": {
+            "tier": { "type": "string" },
+            "effort": { "type": ["string", "null"] },
+            "modifiers": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "description": { "type": "string" }
+      }
+    }
+  }
+}

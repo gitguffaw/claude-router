@@ -7,12 +7,13 @@ import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
 import { getClaudeAuthStatus, getClaudeAvailability, getClaudeMcpStatus, getClaudePluginStatus, runClaudePrintJob, runClaudeUltrareview } from "./lib/claude.mjs";
 import { createContextPack } from "./lib/context-pack.mjs";
 import { handleCancel, handleResult, handleStatus } from "./lib/job-commands.mjs";
-import { renderSetupReport, renderStartedJob } from "./lib/render.mjs";
+import { renderModelCatalog, renderSetupReport, renderStartedJob } from "./lib/render.mjs";
 import { buildRouterRequest } from "./lib/router.mjs";
 import { binaryAvailable, runCommand, runProcess, spawnDetached } from "./lib/process.mjs";
 import { generateJobId, readJobFile, resolveJobFile, upsertJob, writeJobFile } from "./lib/state.mjs";
 import { appendLogLine, createJobLogFile, runTrackedJob } from "./lib/tracked-jobs.mjs";
 import { readGitStatus, resolveWorkspaceRoot } from "./lib/workspace.mjs";
+import { getModelCatalog } from "./lib/model-catalog.mjs";
 
 const SCRIPT = fileURLToPath(import.meta.url);
 
@@ -327,10 +328,21 @@ async function handleUltrareview(argv) {
   output(options.json ? result : result.rendered, Boolean(options.json));
 }
 
+async function handleModels(argv) {
+  const { options } = parseCommandInput(argv, {
+    valueOptions: ["capability"],
+    booleanOptions: ["json"]
+  });
+  const catalog = getModelCatalog({
+    capability: options.capability || null
+  });
+  output(options.json ? catalog : renderModelCatalog(catalog), Boolean(options.json));
+}
+
 async function main() {
   const [command, ...argv] = process.argv.slice(2);
   if (!command || command === "--help") {
-    process.stdout.write("Usage: claude-companion.mjs <setup|surface|help|raw|analyze|plan|exec|review|ultrareview|status|result|cancel> [args]\n");
+    process.stdout.write("Usage: claude-companion.mjs <setup|surface|help|raw|analyze|plan|exec|review|ultrareview|status|result|cancel|models> [args]\n");
     return;
   }
   if (command === "setup") {
@@ -362,6 +374,8 @@ async function main() {
   } else if (command === "cancel") {
     const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
     handleCancel(resolveWorkspaceRoot(resolveCwd(options)), { reference: positionals[0] ?? "", json: Boolean(options.json) });
+  } else if (command === "models") {
+    await handleModels(argv);
   } else {
     throw new Error(`Unknown command "${command}".`);
   }

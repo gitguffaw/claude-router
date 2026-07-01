@@ -53,6 +53,7 @@ Available modes:
 - `status`: list or inspect Claude Router jobs
 - `result`: fetch a stored job result
 - `cancel`: cancel a background job
+- `models`: return the catalog of available Claude models, effort levels, permission modes, and modifier flags
 - `raw`: run exact Claude CLI args with mutation and dangerous-permission guardrails
 
 Examples:
@@ -63,7 +64,33 @@ node scripts/claude-companion.mjs analyze --cwd /path/to/project "map the archit
 node scripts/claude-companion.mjs plan --cwd /path/to/project --background "plan the migration"
 node scripts/claude-companion.mjs status --cwd /path/to/project
 node scripts/claude-companion.mjs result --cwd /path/to/project <job-id>
+node scripts/claude-companion.mjs models
+node scripts/claude-companion.mjs models --capability ultrathink
 ```
+
+## Model Catalog Output
+
+The `models` mode returns a structured catalog with these sections:
+
+- **tiers**: Model tiers (haiku, sonnet, opus) with context window, long-context and ultrathink support, and cost tier
+- **effort_levels**: Reasoning depth controls (low, medium, high, xhigh, max) with token budgets
+- **modifiers**: Boolean session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) with tier compatibility
+- **permission_modes**: Session permission controls with activation rules
+- **presets**: Shortcut flags (`--best` resolves to opus)
+
+### Permission Modes
+
+| Mode | Flag Value | Requires `--allow-dangerous` |
+| --- | --- | --- |
+| default | `default` | No |
+| plan | `plan` | No |
+| bypassPermissions | `bypassPermissions` | Yes |
+
+### Capability Filter
+
+Pass `--capability <value>` to filter tiers. Valid values: `long_context`, `ultrathink`, `chrome`. Unknown values are rejected with an error.
+
+The catalog is static curated data, not a live probe of account capabilities.
 
 ## MCP Server
 
@@ -73,10 +100,11 @@ If AGY can attach to a local MCP server for this plugin, start the server from t
 node plugins/claude-router/scripts/claude-router-mcp.mjs
 ```
 
-The MCP server exposes the `claude_router_*` tools for setup, surface discovery, help, raw passthrough, analyze, plan, exec, review, ultrareview, status, result, and cancel.
+The MCP server exposes the `claude_router_*` tools for setup, surface discovery, help, raw passthrough, analyze, plan, exec, review, ultrareview, models, status, result, and cancel.
 
 ## Routing Rules
 
+- Use `models` to discover available model tiers, effort levels, permission modes, and modifiers before selecting Claude controls for a task.
 - Run `setup` before the first delegated task when local Claude availability is unknown.
 - Use `analyze`, `plan`, and `review` only for read-only work.
 - Use `exec` only when the user explicitly wants Claude to edit files.

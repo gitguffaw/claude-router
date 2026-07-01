@@ -94,3 +94,41 @@ export function renderStoredJobResult(job) {
   lines.push("", job.rendered || JSON.stringify(job.result ?? {}, null, 2));
   return `${lines.join("\n").trimEnd()}\n`;
 }
+
+export function renderModelCatalog(catalog) {
+  const lines = [
+    "# Claude Router Model Catalog",
+    "",
+    `Catalog version: ${catalog.catalog_version}`,
+    "",
+    "## Model Tiers",
+    "",
+    "| Tier | Flag | Context | Long Context | Ultrathink | Cost |",
+    "| --- | --- | --- | --- | --- | --- |"
+  ];
+  for (const tier of catalog.tiers) {
+    lines.push(`| ${escapeCell(tier.display_name)} | ${escapeCell(tier.flag)} | ${escapeCell(tier.context_window)} | ${escapeCell(tier.long_context_window ?? "—")} | ${escapeCell(tier.supports_ultrathink ? "yes" : "no")} | ${escapeCell(tier.cost_tier)} |`);
+  }
+  lines.push("");
+  for (const tier of catalog.tiers) {
+    lines.push(`- **${tier.display_name}**: ${tier.notes}`);
+  }
+  lines.push("", "## Effort Levels", "", "| Level | Description | Token Budget | Recommended For |", "| --- | --- | --- | --- |");
+  for (const level of catalog.effort_levels) {
+    lines.push(`| ${escapeCell(level.flag_value)} | ${escapeCell(level.description)} | ${escapeCell(level.token_budget)} | ${escapeCell(level.recommended_for)} |`);
+  }
+  lines.push("", "## Modifiers", "");
+  for (const mod of catalog.modifiers) {
+    const compat = mod.compatible_tiers.length ? `Compatible: ${mod.compatible_tiers.join(", ")}` : "All tiers";
+    lines.push(`- **${mod.flag}**: ${mod.description} (${compat})`);
+  }
+  lines.push("", "## Permission Modes", "", "| Mode | Description | Requires --allow-dangerous |", "| --- | --- | --- |");
+  for (const mode of catalog.permission_modes) {
+    lines.push(`| ${escapeCell(mode.flag_value)} | ${escapeCell(mode.description)} | ${escapeCell(mode.requires_allow_dangerous ? "yes" : "no")} |`);
+  }
+  lines.push("", "## Presets", "");
+  for (const preset of catalog.presets) {
+    lines.push(`- **${preset.flag}**: ${preset.description} (resolves to ${preset.resolves_to.tier})`);
+  }
+  return `${lines.join("\n")}\n`;
+}

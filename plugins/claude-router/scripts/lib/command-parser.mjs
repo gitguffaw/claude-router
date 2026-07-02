@@ -183,7 +183,7 @@ export function parseClaudeArgv(argv, options = {}) {
       const parsed = parseFlag(tokens, index, parseOptions);
       const target = afterCommand ? result.flags : result.globalFlags;
       target.push(parsed.flag);
-      if (parsed.flag.name === "help" || parsed.flag.name === "version") {
+      if ((parsed.flag.name === "help" || parsed.flag.name === "version") && parsed.flag.value === true) {
         result.helpOnly = true;
       }
       if (parsed.flag.name === "dry-run") {
@@ -225,7 +225,7 @@ export function parseClaudeArgv(argv, options = {}) {
   if (result.commandPath[0] === "help") {
     result.helpOnly = true;
   }
-  if (result.commandPath[1] === "help" || (result.commandPath.length > 0 && result.positionals.includes("help"))) {
+  if (result.commandPath[1] === "help") {
     result.helpOnly = true;
   }
   return result;

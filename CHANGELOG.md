@@ -2,6 +2,15 @@
 
 All notable changes to Claude Router are documented here.
 
+## [2.2.1] — 2026-07-02
+
+### Fixed
+
+- Hardened raw Claude CLI guardrails so global flags, literal `help` arguments, `--help=false`, and `--dry-run=false` cannot hide mutating commands.
+- Blocked routed dangerous permission bypasses through `--permission-mode bypassPermissions` and `--allow-dangerously-skip-permissions` unless `--allow-dangerous` is explicitly supplied.
+- Preserved repeated routed values and inline values containing `=`, including tool allowlists and prompt/system-prompt controls.
+- Required `cancel` to target an active job and made state/job writes atomic to avoid partial JSON reads during background job races.
+
 ## [2.2.0] — 2026-07-02
 
 ### Added

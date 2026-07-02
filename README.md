@@ -1,6 +1,6 @@
 # Claude Router
 
-Current release: `v2.2.0`
+Current release: `v2.2.1`
 
 Claude Router lets a host agent delegate work to the local Claude Code CLI through policy-backed modes for setup, analysis, planning, implementation, review, model and capability discovery, background jobs, result retrieval, and guarded access to installed Claude CLI features.
 
@@ -477,6 +477,20 @@ Read-only routed modes snapshot git status before and after Claude runs. If Clau
 
 ## Uninstall
 
+### Uninstall From Claude Code
+
+Remove the Claude Code plugin:
+
+```bash
+claude plugin uninstall claude-router
+```
+
+Remove the marketplace entry if you no longer want Claude Code to list it:
+
+```bash
+claude plugin marketplace remove claude-router
+```
+
 ### Uninstall From Codex
 
 Remove the plugin:
@@ -528,6 +542,8 @@ If setup says auth is missing, run:
 ```bash
 claude auth login
 ```
+
+If setup says the Claude Router plugin or MCP server is missing, reinstall the relevant host integration and rerun setup.
 
 If Claude runs against the wrong project, pass `cwd` through the tool request or use `--cwd` with the direct CLI.
 

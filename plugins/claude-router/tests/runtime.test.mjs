@@ -10,6 +10,33 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = path.join(ROOT, "scripts", "claude-companion.mjs");
 const PLUGIN = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
 
+function installFakeClaudeWithoutRouter(binDir) {
+  fs.mkdirSync(binDir, { recursive: true });
+  const fake = path.join(binDir, "claude");
+  fs.writeFileSync(fake, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.includes("--version")) {
+  console.log("2.1.185 (Claude Code)");
+  process.exit(0);
+}
+if (args[0] === "auth" && args[1] === "status") {
+  console.log(JSON.stringify({ loggedIn: true, authMethod: "claude.ai", subscriptionType: "max" }));
+  process.exit(0);
+}
+if (args[0] === "plugin" && args[1] === "list") {
+  console.log("Installed plugins:\\n  other-plugin enabled");
+  process.exit(0);
+}
+if (args[0] === "mcp" && args[1] === "list") {
+  console.log("other-server: connected");
+  process.exit(0);
+}
+console.log("fake claude");
+`, "utf8");
+  fs.chmodSync(fake, 0o755);
+  return fake;
+}
+
 test("setup reports ready with fake claude", () => {
   const bin = makeTempDir();
   const data = makeTempDir();
@@ -19,6 +46,20 @@ test("setup reports ready with fake claude", () => {
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.ready, true);
   assert.match(payload.claude.detail, /2.1.185/);
+});
+
+test("setup reports not ready when Claude Router plugin or MCP registration is missing", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaudeWithoutRouter(bin);
+  const result = run("node", [SCRIPT, "setup", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.coreReady, true);
+  assert.equal(payload.ready, false);
+  assert.equal(payload.plugins.ok, false);
+  assert.equal(payload.mcp.ok, false);
+  assert.match(payload.nextSteps.join("\n"), /Claude Router Claude Code plugin/);
 });
 
 test("surface reports local claude help", () => {
@@ -97,6 +138,87 @@ test("raw claude command can read help and blocks mutating commands by default",
   assert.match(blockedMcpLogin.stderr, /may mutate/);
 });
 
+test("raw guardrails classify command paths after global flags and do not trust literal help args", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  for (const args of [
+    ["raw", "--json", "--", "--model", "opus", "mcp", "add", "example", "node"],
+    ["raw", "--json", "--", "--permission-mode", "plan", "mcp", "remove", "example"],
+    ["raw", "--json", "--", "mcp", "add", "help", "node"],
+    ["raw", "--json", "--", "plugin", "install", "help"],
+    ["raw", "--json", "--", "project", "purge", "--dry-run=false"],
+    ["raw", "--json", "--", "mcp", "add", "example", "node", "--help=false"]
+  ]) {
+    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
+    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
+    assert.match(blocked.stderr, /may mutate/);
+  }
+});
+
+test("routed commands reject dangerous permission bypass spellings without router override", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  for (const args of [
+    ["analyze", "--json", "--permission-mode", "bypassPermissions", "dangerous"],
+    ["exec", "--json", "--allow-dangerously-skip-permissions", "dangerous"]
+  ]) {
+    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
+    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
+    assert.match(blocked.stderr, /Dangerous permission bypass/);
+  }
+
+  const allowed = run("node", [SCRIPT, "analyze", "--json", "--allow-dangerous", "--permission-mode", "bypassPermissions", "accepted risk"], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.equal(allowed.status, 0, allowed.stderr);
+  const payload = JSON.parse(allowed.stdout);
+  assert.equal(payload.request.permissionMode, "bypassPermissions");
+});
+
+test("routed commands reject CLI-level unsupported review and web search flags", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  for (const args of [
+    ["review", "--json", "--scope", "src", "review target"],
+    ["adversarial-review", "--json", "--scope", "src", "review target"],
+    ["analyze", "--json", "--webSearch", "find docs"],
+    ["analyze", "--json", "--web-search", "find docs"]
+  ]) {
+    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
+    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
+  }
+});
+
+test("routed parser preserves repeatable values, inline equals, and bare optional flags", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const result = run("node", [
+    SCRIPT,
+    "analyze",
+    "--json",
+    "--debug",
+    "--append-system-prompt=A=B",
+    "--allowed-tools",
+    "Read",
+    "--allowed-tools",
+    "Bash(git *)",
+    "inspect parser"
+  ], { cwd: repo, env: buildEnv(bin, data) });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  const args = payload.result.args;
+  assert.deepEqual(args.slice(args.indexOf("--debug"), args.indexOf("--debug") + 1), ["--debug"]);
+  assert.equal(args[args.indexOf("--append-system-prompt") + 1], "A=B");
+  assert.equal(args.filter((arg) => arg === "--allowedTools").length, 2);
+  assert.ok(args.includes("Read"));
+  assert.ok(args.includes("Bash(git *)"));
+  assert.match(payload.request.userRequest, /inspect parser/);
+});
+
 test("analyze stores completed job and context pack", () => {
   const repo = makeTempDir();
   const bin = makeTempDir();
@@ -144,6 +266,14 @@ test("status and result return stored jobs", () => {
   assert.equal(result.status, 0, result.stderr);
   const resultPayload = JSON.parse(result.stdout);
   assert.equal(resultPayload.status, "completed");
+
+  const missingIdCancel = run("node", [SCRIPT, "cancel", "--json"], { cwd: repo, env: buildEnv(bin, data) });
+  assert.notEqual(missingIdCancel.status, 0);
+  assert.match(missingIdCancel.stderr, /requires a job id/);
+
+  const completedCancel = run("node", [SCRIPT, "cancel", "--json", statusPayload.jobs[0].id], { cwd: repo, env: buildEnv(bin, data) });
+  assert.notEqual(completedCancel.status, 0);
+  assert.match(completedCancel.stderr, /Cannot cancel job/);
 });
 
 test("status truncates long job lists unless --all is provided", () => {

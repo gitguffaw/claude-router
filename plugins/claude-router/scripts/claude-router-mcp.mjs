@@ -30,6 +30,7 @@ const tools = [
 
 const ROUTED_COMMANDS = new Set(["analyze", "plan", "exec", "review", "adversarial-review"]);
 const VALUE_FLAGS = [
+  ["--base", "base"],
   ["--model", "model"],
   ["--effort", "effort"],
   ["--permission-mode", "permission_mode", "permission-mode"],
@@ -46,7 +47,6 @@ const VALUE_FLAGS = [
   ["--tools", "tools"],
   ["--append-system-prompt", "append_system_prompt", "append-system-prompt"],
   ["--betas", "betas"],
-  ["--debug", "debug"],
   ["--debug-file", "debug_file", "debug-file"],
   ["--fallback-model", "fallback_model", "fallback-model"],
   ["--file", "file"],
@@ -59,9 +59,13 @@ const VALUE_FLAGS = [
   ["--prompt-suggestions", "prompt_suggestions", "prompt-suggestions"],
   ["--remote-control", "remote_control", "remote-control"],
   ["--remote-control-session-name-prefix", "remote_control_session_name_prefix", "remote-control-session-name-prefix"],
-  ["--resume", "resume"],
   ["--session-id", "session_id", "session-id"],
-  ["--system-prompt", "system_prompt", "system-prompt"],
+  ["--scope", "scope"],
+  ["--system-prompt", "system_prompt", "system-prompt"]
+];
+const OPTIONAL_VALUE_FLAGS = [
+  ["--debug", "debug"],
+  ["--resume", "resume"],
   ["--tmux", "tmux"],
   ["--worktree", "worktree"]
 ];
@@ -72,6 +76,8 @@ const BOOLEAN_FLAGS = [
   ["--opus", "opus"],
   ["--haiku", "haiku"],
   ["--long-context", "long_context", "long-context"],
+  ["--search", "search"],
+  ["--web-search", "web_search", "web-search", "webSearch"],
   ["--chrome", "chrome"],
   ["--no-chrome", "no_chrome", "no-chrome"],
   ["--bare", "bare"],
@@ -107,8 +113,16 @@ function schemaFor(tool) {
     chrome: { type: "boolean" },
     timeout: { type: "string" },
     timeout_ms: { type: "number" },
+    poll_interval_ms: { type: "number" },
     wait: { type: "boolean" },
     all: { type: "boolean" },
+    base: { type: "string" },
+    scope: { type: "string" },
+    search: { type: "boolean" },
+    web_search: { type: "boolean" },
+    debug: { oneOf: [{ type: "boolean" }, { type: "string" }] },
+    tmux: { oneOf: [{ type: "boolean" }, { type: "string" }] },
+    worktree: { oneOf: [{ type: "boolean" }, { type: "string" }] },
     allow_mutating: { type: "boolean" },
     allow_dangerous: { type: "boolean" },
     permission_mode: { type: "string" },
@@ -126,7 +140,7 @@ function schemaFor(tool) {
     agent: { type: "string" },
     agents: { type: "string" },
     json_schema: { type: "string" },
-    resume: { type: "string" },
+    resume: { oneOf: [{ type: "boolean" }, { type: "string" }] },
     session_id: { type: "string" }
   };
   if (tool.command === "models") {
@@ -184,9 +198,23 @@ function appendBoolean(args, input, flag, keys) {
   }
 }
 
+function appendOptionalValue(args, input, flag, keys) {
+  const value = firstDefined(input, keys);
+  if (value === undefined || value === "") {
+    return;
+  }
+  args.push(flag);
+  if (value !== true) {
+    args.push(String(value));
+  }
+}
+
 function appendRoutedFlags(args, input) {
   for (const [flag, ...keys] of VALUE_FLAGS) {
     appendValue(args, input, flag, keys);
+  }
+  for (const [flag, ...keys] of OPTIONAL_VALUE_FLAGS) {
+    appendOptionalValue(args, input, flag, keys);
   }
   for (const [flag, ...keys] of BOOLEAN_FLAGS) {
     appendBoolean(args, input, flag, keys);

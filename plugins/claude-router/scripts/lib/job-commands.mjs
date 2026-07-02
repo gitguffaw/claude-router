@@ -40,7 +40,13 @@ export function handleResult(cwd, { reference = "", json = false } = {}) {
 }
 
 export function handleCancel(cwd, { reference = "", json = false } = {}) {
+  if (!reference) {
+    throw new Error("cancel requires a job id.");
+  }
   const job = readFullJob(cwd, reference);
+  if (!isActiveJobStatus(job.status)) {
+    throw new Error(`Cannot cancel job ${job.id} because it is ${job.status}.`);
+  }
   const signal = terminateProcessTree(job.pid ?? Number.NaN);
   const cancelled = { ...job, status: "cancelled", phase: "cancelled", pid: null, completedAt: new Date().toISOString(), cancelSignal: signal };
   upsertJob(cwd, cancelled);

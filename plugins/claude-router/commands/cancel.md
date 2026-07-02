@@ -1,6 +1,6 @@
 ---
 description: Cancel an active Claude Router background job
-argument-hint: '[job-id]'
+argument-hint: '<job-id>'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---

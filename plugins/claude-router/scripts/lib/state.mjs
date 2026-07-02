@@ -81,6 +81,12 @@ function removeIfExists(file) {
   }
 }
 
+function writeJsonAtomic(file, payload) {
+  const tempFile = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+  fs.writeFileSync(tempFile, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(tempFile, file);
+}
+
 export function saveState(cwd, state) {
   const previousJobs = loadState(cwd).jobs;
   ensureStateDir(cwd);
@@ -93,7 +99,7 @@ export function saveState(cwd, state) {
     }
   }
   const nextState = { version: STATE_VERSION, config: state.config ?? {}, jobs: nextJobs };
-  fs.writeFileSync(resolveStateFile(cwd), `${JSON.stringify(nextState, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  writeJsonAtomic(resolveStateFile(cwd), nextState);
   return nextState;
 }
 
@@ -126,7 +132,7 @@ export function upsertJob(cwd, patch) {
 export function writeJobFile(cwd, jobId, payload) {
   ensureStateDir(cwd);
   const file = resolveJobFile(cwd, jobId);
-  fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  writeJsonAtomic(file, payload);
   return file;
 }
 

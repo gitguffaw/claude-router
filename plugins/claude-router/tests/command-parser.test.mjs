@@ -70,6 +70,14 @@ test("parseClaudeArgv only treats enabled dry-run as dry-run", () => {
   assert.equal(disabled.dryRun, false);
 });
 
+test("parseClaudeArgv does not treat a literal help argument as help-only", () => {
+  const parsed = parseClaudeArgv(["mcp", "add", "help", "node"]);
+
+  assert.deepEqual(parsed.commandPath, ["mcp", "add"]);
+  assert.deepEqual(parsed.positionals, ["help", "node"]);
+  assert.equal(parsed.helpOnly, false);
+});
+
 test("parseClaudeArgv records unknown subcommands under known commands", () => {
   const parsed = parseClaudeArgv(["mcp", "future-subcommand", "--json"]);
 

@@ -57,9 +57,21 @@ test("managed print jobs pass through advanced claude controls", () => {
   assert.ok(args.includes("--include-partial-messages"));
 });
 
+test("optional Claude flags can be emitted bare or with a value", () => {
+  const bare = buildClaudePrintArgs(buildRouterRequest({ mode: "analyze", prompt: "inspect", options: { debug: true } }));
+  const valued = buildClaudePrintArgs(buildRouterRequest({ mode: "analyze", prompt: "inspect", options: { resume: "session-1" } }));
+
+  assert.ok(bare.includes("--debug"));
+  assert.equal(bare.includes("true"), false);
+  assert.equal(valued[valued.indexOf("--resume") + 1], "session-1");
+});
+
 test("unsupported web search and dangerous permissions fail clearly", () => {
   assert.throws(() => buildRouterRequest({ mode: "analyze", prompt: "x", options: { search: true } }), /native generic web-search/);
+  assert.throws(() => buildRouterRequest({ mode: "analyze", prompt: "x", options: { "web-search": true } }), /native generic web-search/);
   assert.throws(() => buildRouterRequest({ mode: "exec", prompt: "x", options: { "dangerously-skip-permissions": true } }), /Dangerous permission/);
+  assert.throws(() => buildRouterRequest({ mode: "exec", prompt: "x", options: { "permission-mode": "bypassPermissions" } }), /Dangerous permission/);
+  assert.throws(() => buildRouterRequest({ mode: "exec", prompt: "x", options: { "allow-dangerously-skip-permissions": true } }), /Dangerous permission/);
 });
 
 test("review target flags fail instead of pretending to scope the review", () => {

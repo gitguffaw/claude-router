@@ -56,6 +56,14 @@ function appendValue(args, flag, value) {
   }
 }
 
+function appendOptionalValue(args, flag, value) {
+  if (value === true) {
+    args.push(flag);
+  } else {
+    appendValue(args, flag, value);
+  }
+}
+
 function appendBoolean(args, flag, enabled) {
   if (enabled) {
     args.push(flag);
@@ -83,7 +91,7 @@ export function buildClaudePrintArgs(request) {
   appendRepeatable(args, "--betas", controls.betas);
   appendBoolean(args, "--brief", controls.brief);
   appendBoolean(args, "--continue", controls.continue);
-  appendValue(args, "--debug", controls.debug);
+  appendOptionalValue(args, "--debug", controls.debug);
   appendValue(args, "--debug-file", controls.debugFile);
   appendBoolean(args, "--disable-slash-commands", controls.disableSlashCommands);
   appendBoolean(args, "--exclude-dynamic-system-prompt-sections", controls.excludeDynamicSystemPromptSections);
@@ -103,13 +111,13 @@ export function buildClaudePrintArgs(request) {
   appendValue(args, "--remote-control", controls.remoteControl);
   appendValue(args, "--remote-control-session-name-prefix", controls.remoteControlSessionNamePrefix);
   appendBoolean(args, "--replay-user-messages", controls.replayUserMessages);
-  appendValue(args, "--resume", controls.resume);
+  appendOptionalValue(args, "--resume", controls.resume);
   appendBoolean(args, "--safe-mode", controls.safeMode);
   appendValue(args, "--session-id", controls.sessionId);
   appendValue(args, "--system-prompt", controls.systemPrompt);
-  appendValue(args, "--tmux", controls.tmux);
+  appendOptionalValue(args, "--tmux", controls.tmux);
   appendBoolean(args, "--verbose", controls.verbose);
-  appendValue(args, "--worktree", controls.worktree);
+  appendOptionalValue(args, "--worktree", controls.worktree);
   appendBoolean(args, "--allow-dangerously-skip-permissions", controls.allowDangerouslySkipPermissions);
   appendRepeatable(args, "--plugin-dir", controls.pluginDirs);
   appendRepeatable(args, "--plugin-url", controls.pluginUrls);

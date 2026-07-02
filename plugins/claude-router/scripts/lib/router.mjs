@@ -15,7 +15,12 @@ function requirePrompt(prompt) {
 }
 
 function rejectDangerous(options) {
-  if ((options["dangerously-skip-permissions"] || options["bypass-permissions"]) && !options["allow-dangerous"]) {
+  const permissionModeBypass = options["permission-mode"] === "bypassPermissions";
+  const dangerousBypass = options["dangerously-skip-permissions"] ||
+    options["bypass-permissions"] ||
+    options["allow-dangerously-skip-permissions"] ||
+    permissionModeBypass;
+  if (dangerousBypass && !options["allow-dangerous"]) {
     throw new Error("Dangerous permission bypass was requested. Re-run with --allow-dangerous only if the user explicitly accepts that risk.");
   }
 }
@@ -56,7 +61,7 @@ export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = nul
   if (!config) {
     throw new Error(`Unsupported Claude Router mode "${mode}".`);
   }
-  if (options.search || options.webSearch) {
+  if (options.search || options.webSearch || options["web-search"]) {
     throw new Error("Claude Router does not expose a native generic web-search shell command. Claude Code has in-session WebSearch and /deep-research surfaces; use --chrome for browser work or ask for MCP/docs verification.");
   }
   rejectDangerous(options);

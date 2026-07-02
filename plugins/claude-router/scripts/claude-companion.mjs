@@ -4,6 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
+import { parseClaudeArgv } from "./lib/command-parser.mjs";
 import { getClaudeAuthStatus, getClaudeAvailability, getClaudeMcpStatus, getClaudePluginStatus, runClaudePrintJob, runClaudeUltrareview } from "./lib/claude.mjs";
 import { createContextPack } from "./lib/context-pack.mjs";
 import { handleCancel, handleResult, handleStatus } from "./lib/job-commands.mjs";
@@ -48,7 +49,9 @@ function normalizeArgv(argv) {
 function parseCommandInput(argv, config = {}) {
   return parseArgs(normalizeArgv(argv), {
     ...config,
-    aliasMap: { C: "cwd", ...(config.aliasMap ?? {}) }
+    aliasMap: { C: "cwd", ...(config.aliasMap ?? {}) },
+    repeatableOptions: [...REPEATABLE_VALUES, ...(config.repeatableOptions ?? [])],
+    optionalValueOptions: [...OPTIONAL_VALUES, ...(config.optionalValueOptions ?? [])]
   });
 }
 
@@ -64,8 +67,18 @@ async function buildSetupReport(cwd) {
   const node = binaryAvailable("node", ["--version"], { cwd });
   const claude = getClaudeAvailability(cwd);
   const auth = claude.available ? getClaudeAuthStatus(cwd) : { loggedIn: false, detail: "claude unavailable" };
-  const plugins = claude.available ? getClaudePluginStatus(cwd) : { ok: false, detail: "" };
-  const mcp = claude.available ? getClaudeMcpStatus(cwd) : { ok: false, detail: "" };
+  const rawPlugins = claude.available ? getClaudePluginStatus(cwd) : { ok: false, detail: "" };
+  const rawMcp = claude.available ? getClaudeMcpStatus(cwd) : { ok: false, detail: "" };
+  const plugins = {
+    ...rawPlugins,
+    ok: rawPlugins.ok && /claude-router/i.test(rawPlugins.detail || ""),
+    checked: rawPlugins.ok
+  };
+  const mcp = {
+    ...rawMcp,
+    ok: rawMcp.ok && /claude-router/i.test(rawMcp.detail || ""),
+    checked: rawMcp.ok
+  };
   const nextSteps = [];
   if (!claude.available) {
     nextSteps.push("Install Claude Code, then rerun setup.");
@@ -73,7 +86,22 @@ async function buildSetupReport(cwd) {
   if (claude.available && !auth.loggedIn) {
     nextSteps.push("Run `claude auth login` or the appropriate Claude Code auth flow.");
   }
-  return { ready: node.available && claude.available && auth.loggedIn, node, claude, auth, plugins, mcp, nextSteps };
+  if (claude.available && !plugins.ok) {
+    nextSteps.push("Install or enable the Claude Router Claude Code plugin, then rerun setup.");
+  }
+  if (claude.available && !mcp.ok) {
+    nextSteps.push("Register or reconnect the claude-router MCP server if this host should expose router tools through Claude MCP.");
+  }
+  return {
+    ready: node.available && claude.available && auth.loggedIn && plugins.ok && mcp.ok,
+    coreReady: node.available && claude.available && auth.loggedIn,
+    node,
+    claude,
+    auth,
+    plugins,
+    mcp,
+    nextSteps
+  };
 }
 
 async function handleSetup(argv) {
@@ -95,6 +123,7 @@ const COMMON_VALUES = [
   "setting-sources",
   "add-dir",
   "base",
+  "scope",
   "timeout",
   "agent",
   "agents",
@@ -103,7 +132,6 @@ const COMMON_VALUES = [
   "tools",
   "append-system-prompt",
   "betas",
-  "debug",
   "debug-file",
   "fallback-model",
   "file",
@@ -116,12 +144,11 @@ const COMMON_VALUES = [
   "prompt-suggestions",
   "remote-control",
   "remote-control-session-name-prefix",
-  "resume",
   "session-id",
-  "system-prompt",
-  "tmux",
-  "worktree"
+  "system-prompt"
 ];
+const OPTIONAL_VALUES = ["debug", "resume", "tmux", "worktree"];
+const REPEATABLE_VALUES = ["plugin-dir", "plugin-url", "mcp-config", "add-dir", "allowed-tools", "disallowed-tools", "tools", "betas", "file"];
 const COMMON_BOOLEANS = [
   "json",
   "background",
@@ -140,6 +167,8 @@ const COMMON_BOOLEANS = [
   "allow-dangerous",
   "allow-dangerously-skip-permissions",
   "search",
+  "webSearch",
+  "web-search",
   "ax-screen-reader",
   "brief",
   "continue",
@@ -156,7 +185,7 @@ const COMMON_BOOLEANS = [
 ];
 
 function normalizeRepeatables(options) {
-  for (const key of ["plugin-dir", "plugin-url", "mcp-config", "add-dir", "allowed-tools", "disallowed-tools", "tools", "betas", "file"]) {
+  for (const key of REPEATABLE_VALUES) {
     if (options[key] && !Array.isArray(options[key])) {
       options[key] = [options[key]];
     }
@@ -290,11 +319,15 @@ function hasFlag(args, ...flags) {
 }
 
 function rawCommandClassification(args) {
-  const [first, second, third] = args;
-  const helpOnly = hasFlag(args, "-h", "--help") || first === "help" || second === "help" || third === "help";
-  const dryRun = hasFlag(args, "--dry-run");
-  const dangerous = hasFlag(args, "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions") ||
-    args.some((arg, index) => (arg === "--permission-mode" && args[index + 1] === "bypassPermissions") || arg === "--permission-mode=bypassPermissions");
+  const parsed = parseClaudeArgv(args);
+  const [first, second] = parsed.commandPath;
+  const third = parsed.positionals[0];
+  const allFlags = [...parsed.globalFlags, ...parsed.flags];
+  const flagValue = (name) => allFlags.find((flag) => flag.name === name)?.value;
+  const helpOnly = parsed.helpOnly;
+  const dryRun = parsed.dryRun;
+  const dangerous = ["dangerously-skip-permissions", "allow-dangerously-skip-permissions", "bypass-permissions"].some((name) => flagValue(name) === true) ||
+    flagValue("permission-mode") === "bypassPermissions";
   let mutating = false;
   const pluginCommand = first === "plugin" || first === "plugins";
   if (!helpOnly) {
@@ -309,7 +342,7 @@ function rawCommandClassification(args) {
       first === "project" && second === "purge" && !dryRun
     ].some(Boolean);
   }
-  return { helpOnly, dryRun, dangerous, mutating };
+  return { helpOnly, dryRun, dangerous, mutating, commandPath: parsed.commandPath, unknown: parsed.unknown };
 }
 
 function assertRawClaudeArgs(args, options = {}) {

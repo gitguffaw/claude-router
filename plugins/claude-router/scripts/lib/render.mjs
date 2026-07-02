@@ -23,8 +23,8 @@ export function renderSetupReport(report) {
     `- node: ${report.node.detail}`,
     `- claude: ${report.claude.detail}`,
     `- auth: ${report.auth.detail}`,
-    `- plugins: ${report.plugins.ok ? "checked" : "not available"}`,
-    `- mcp: ${report.mcp.ok ? "checked" : "not available"}`
+    `- plugins: ${report.plugins.ok ? "claude-router found" : report.plugins.checked ? "claude-router missing" : "not available"}`,
+    `- mcp: ${report.mcp.ok ? "claude-router found" : report.mcp.checked ? "claude-router missing" : "not available"}`
   ];
   if (report.nextSteps.length) {
     lines.push("", "Next steps:");

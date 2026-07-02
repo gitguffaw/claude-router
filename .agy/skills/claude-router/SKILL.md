@@ -49,6 +49,7 @@ Available modes:
 - `plan`: read-only implementation or migration plan
 - `exec`: write-capable implementation; use only when the user asks for edits
 - `review`: read-only code review; findings first and no auto-fixes
+- `adversarial-review`: read-only challenge review of approach, assumptions, and design tradeoffs
 - `ultrareview`: run Claude's cloud-hosted `ultrareview`
 - `status`: list or inspect Claude Router jobs
 - `result`: fetch a stored job result
@@ -56,6 +57,7 @@ Available modes:
 - `version`: show Claude Router and installed Claude CLI versions
 - `models`: return live Claude model selectors plus curated effort levels, permission modes, and modifier flags
 - `raw`: run exact Claude CLI args with mutation and dangerous-permission guardrails
+- `cli`: alias for guarded raw Claude CLI passthrough
 
 Examples:
 
@@ -103,7 +105,7 @@ If AGY can attach to a local MCP server for this plugin, start the server from t
 node plugins/claude-router/scripts/claude-router-mcp.mjs
 ```
 
-The MCP server exposes the `claude_router_*` tools for setup, surface discovery, help, version, raw passthrough, analyze, plan, exec, review, ultrareview, models, status, result, and cancel.
+The MCP server exposes the `claude_router_*` tools for setup, surface discovery, help, version, raw passthrough, analyze, plan, exec, review, adversarial review, ultrareview, models, status, result, and cancel.
 
 ## Routing Rules
 

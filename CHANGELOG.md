@@ -2,7 +2,7 @@
 
 All notable changes to Claude Router are documented here.
 
-## Unreleased
+## [2.1.1] — 2026-07-02
 
 ### Added
 

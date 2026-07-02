@@ -26,7 +26,7 @@ test("surface reports local claude help", () => {
   const result = run("node", [SCRIPT, "surface", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
-  assert.equal(payload.router.version, "2.1.0");
+  assert.equal(payload.router.version, "2.1.1");
   assert.match(payload.version.stdout, /2.1.185/);
   assert.match(payload.help.stdout, /Usage: claude/);
 });
@@ -38,7 +38,7 @@ test("version reports both Claude Router and Claude CLI versions", () => {
   const result = run("node", [SCRIPT, "version", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
-  assert.equal(payload.router.version, "2.1.0");
+  assert.equal(payload.router.version, "2.1.1");
   assert.match(payload.claude.stdout, /2.1.185/);
 });
 

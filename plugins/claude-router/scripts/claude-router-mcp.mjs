@@ -20,6 +20,7 @@ const tools = [
   { name: "claude_router_plan", description: "Run read-only Claude planning.", command: "plan", prompt: true },
   { name: "claude_router_exec", description: "Run write-capable Claude execution.", command: "exec", prompt: true },
   { name: "claude_router_review", description: "Run read-only Claude review.", command: "review", prompt: true },
+  { name: "claude_router_adversarial_review", description: "Run read-only Claude challenge review.", command: "adversarial-review", prompt: true },
   { name: "claude_router_ultrareview", description: "Run Claude ultrareview.", command: "ultrareview" },
   { name: "claude_router_status", description: "Show Claude Router jobs.", command: "status" },
   { name: "claude_router_result", description: "Show Claude Router job result.", command: "result" },
@@ -27,7 +28,7 @@ const tools = [
   { name: "claude_router_models", description: "Return live Claude model selectors plus curated effort levels and modifier flags.", command: "models" }
 ];
 
-const ROUTED_COMMANDS = new Set(["analyze", "plan", "exec", "review"]);
+const ROUTED_COMMANDS = new Set(["analyze", "plan", "exec", "review", "adversarial-review"]);
 const VALUE_FLAGS = [
   ["--model", "model"],
   ["--effort", "effort"],
@@ -107,6 +108,7 @@ function schemaFor(tool) {
     timeout: { type: "string" },
     timeout_ms: { type: "number" },
     wait: { type: "boolean" },
+    all: { type: "boolean" },
     allow_mutating: { type: "boolean" },
     allow_dangerous: { type: "boolean" },
     permission_mode: { type: "string" },
@@ -219,6 +221,9 @@ function callTool(name, input = {}) {
   } else if (tool.command === "status") {
     if (input.wait) {
       args.push("--wait");
+    }
+    if (input.all) {
+      args.push("--all");
     }
     if (input.timeout_ms) {
       args.push("--timeout-ms", String(input.timeout_ms));

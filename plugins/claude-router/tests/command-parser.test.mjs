@@ -102,3 +102,17 @@ test("parseClaudeArgv understands command-specific value flags", () => {
   assert.deepEqual(mcp.unknown.flags, []);
   assert.deepEqual(plugin.flags.map((flag) => [flag.name, flag.value]), [["scope", "project"]]);
 });
+
+test("parseClaudeArgv recognizes current Claude lifecycle and MCP commands", () => {
+  const mcpLogin = parseClaudeArgv(["mcp", "login", "sentry", "--no-browser"]);
+  const remoteControl = parseClaudeArgv(["remote-control", "--name", "Demo"]);
+  const stop = parseClaudeArgv(["stop", "abc123"]);
+  const gateway = parseClaudeArgv(["gateway", "--config", "gateway.yaml"]);
+
+  assert.deepEqual(mcpLogin.commandPath, ["mcp", "login"]);
+  assert.deepEqual(mcpLogin.positionals, ["sentry"]);
+  assert.deepEqual(remoteControl.commandPath, ["remote-control"]);
+  assert.deepEqual(stop.commandPath, ["stop"]);
+  assert.deepEqual(gateway.commandPath, ["gateway"]);
+  assert.deepEqual([...mcpLogin.unknown.commands, ...remoteControl.unknown.commands, ...stop.unknown.commands, ...gateway.unknown.commands], []);
+});

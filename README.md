@@ -1,11 +1,12 @@
 # Claude Router
 
-Current release: `v2.1.1`
+Current release: `v2.2.0`
 
 Claude Router lets a host agent delegate work to the local Claude Code CLI through policy-backed modes for setup, analysis, planning, implementation, review, model and capability discovery, background jobs, result retrieval, and guarded access to installed Claude CLI features.
 
 It ships as:
 
+- a Claude Code plugin marketplace package under `.claude-plugin`
 - a Codex plugin marketplace package under `plugins/claude-router`
 - an AGY plugin/skill registration under `.agy`
 
@@ -16,6 +17,7 @@ Use it when you want Codex or AGY to route a specific task to Claude instead of 
 - Node.js 18.18 or newer
 - Claude Code CLI installed locally
 - Claude Code already authenticated
+- For Claude Code: Claude Code CLI with plugin support
 - For Codex: Codex CLI with plugin support
 - For AGY: an AGY build that can install `.agy` plugins or ingest `.agy/skills`
 
@@ -35,6 +37,33 @@ agy --version
 ```
 
 `node scripts/claude-companion.mjs setup` checks Node, Claude, Claude auth, Claude plugins, and Claude MCP status. It does not require Codex or AGY to be installed.
+
+## Install In Claude Code
+
+Install Claude Router as a Claude Code plugin from this marketplace repo:
+
+```bash
+claude plugin marketplace add gitguffaw/claude-router
+claude plugin install claude-router@claude-router
+```
+
+Confirm Claude Code sees the plugin:
+
+```bash
+claude plugin list | grep claude-router
+claude plugin details claude-router
+```
+
+Then start a new Claude Code session, or run `/reload-plugins` in an existing session. Claude Code loads plugin commands under the plugin namespace, such as `/claude-router:models`.
+
+For local development from a clone:
+
+```bash
+git clone https://github.com/gitguffaw/claude-router.git
+cd claude-router
+claude plugin marketplace add "$(pwd)"
+claude plugin install claude-router@claude-router
+```
 
 ## Install In Codex
 
@@ -151,6 +180,46 @@ Use `claude_router_setup` and report the result.
 Use `claude_router_exec` to implement the narrowest fix for the failing tests.
 ```
 
+## Using In Claude Code
+
+Claude Router exposes a `/claude-router:*` command palette when installed in Claude Code:
+
+- `/claude-router:setup`: check local Claude readiness
+- `/claude-router:version`: show Claude Router and Claude CLI versions
+- `/claude-router:models`: show live model selectors and curated controls
+- `/claude-router:surface`: show installed Claude CLI help plus router coverage
+- `/claude-router:help`: show router help or Claude subcommand help
+- `/claude-router:analyze`: run read-only analysis
+- `/claude-router:plan`: run read-only planning
+- `/claude-router:exec`: run write-capable execution
+- `/claude-router:review`: run read-only review
+- `/claude-router:adversarial-review`: challenge approach and assumptions without editing
+- `/claude-router:ultrareview`: run Claude's cloud-hosted ultrareview
+- `/claude-router:status`: list or inspect jobs
+- `/claude-router:result`: fetch a stored job result
+- `/claude-router:cancel`: cancel an active background job
+- `/claude-router:raw` and `/claude-router:cli`: guarded raw Claude CLI passthrough
+
+Examples:
+
+```text
+/claude-router:models
+/claude-router:analyze --model fable inspect this repository
+/claude-router:exec --background implement the narrow fix
+/claude-router:adversarial-review challenge whether this cache design is worth it
+/claude-router:cli plugin list
+```
+
+## Claude Code Parity Notes
+
+Claude Router intentionally maps to Claude Code capabilities, not Codex Router internals one-for-one:
+
+- Claude Code plugin commands are real plugin components, so Claude Router ships `/claude-router:*` commands for Claude Code in addition to Codex MCP tools.
+- Claude Code plugins can ship skills, agents, hooks, MCP servers, LSP servers, monitors, default settings, and command files. Claude Router currently ships command files and MCP tools; hooks and rescue agents are not enabled by default because they would create Claude-reviewing-Claude loops without a clear host boundary.
+- Claude Code has `--model`, `--effort`, `--chrome`, `--agent`, `--agents`, plugin loading, MCP config, background sessions, remote control, gateway, ultrareview, and raw CLI subcommands. Claude Router exposes common delegation modes directly and keeps the rest behind guarded `raw` / `cli` passthrough.
+- Claude Code has a documented `WebSearch` tool and `/deep-research` workflow inside sessions, but there is no verified `claude search` or `claude web-search` shell subcommand. Claude Router therefore rejects Codex-style `--search` and asks users to use `--chrome`, MCP/docs tooling, or explicit verification instead.
+- Codex Router's stop-review gate and app-server broker are Codex-host mechanics. Claude Router uses process-backed Claude CLI jobs, so job status/result/cancel parity exists without copying that broker.
+
 ## What Gets Installed
 
 The plugin exposes these Codex tools:
@@ -163,6 +232,7 @@ The plugin exposes these Codex tools:
 - `claude_router_plan`: read-only implementation or migration planning
 - `claude_router_exec`: write-capable implementation
 - `claude_router_review`: read-only code review
+- `claude_router_adversarial_review`: read-only challenge review of approach and assumptions
 - `claude_router_ultrareview`: run Claude's cloud-hosted `ultrareview`
 - `claude_router_status`: list or inspect jobs
 - `claude_router_result`: fetch a stored job result
@@ -391,13 +461,19 @@ node scripts/claude-companion.mjs raw --allow-dangerous -- -p --permission-mode 
 | `plan` | No | Concrete implementation or migration plan |
 | `exec` | Yes | Narrow implementation with summary and verification |
 | `review` | No | Findings-first review without auto-fixes |
+| `adversarial-review` | No | Challenge approach, assumptions, and tradeoffs without editing |
 | `ultrareview` | No | Claude cloud-hosted multi-agent review |
+| `status` | No | List recent jobs; pass `--all` to show the full retained history |
+| `result` | No | Show a stored job result |
+| `cancel` | No | Cancel an active background job |
 | `surface` | No | Installed Claude version and top-level help |
 | `help` | No | Help for a Claude command path |
+| `version` | No | Claude Router version plus installed Claude CLI version |
 | `models` | No | Available Claude models, effort levels, permission modes, and modifier flags |
 | `raw` | Depends | Exact Claude CLI args with mutation and danger guardrails |
+| `cli` | Depends | Alias for guarded raw Claude CLI passthrough |
 
-Read-only modes snapshot git status before and after Claude runs. If Claude changes files during `analyze`, `plan`, or `review`, the job is marked `completed-with-warnings`.
+Read-only routed modes snapshot git status before and after Claude runs. If Claude changes files during `analyze`, `plan`, `review`, or `adversarial-review`, the job is marked `completed-with-warnings`.
 
 ## Uninstall
 

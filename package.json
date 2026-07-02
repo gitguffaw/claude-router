@@ -1,9 +1,9 @@
 {
   "name": "@compound/claude-router-marketplace",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
-  "description": "Codex plugin marketplace for policy-backed Claude CLI delegation.",
+  "description": "Claude Router marketplace for policy-backed Claude CLI delegation across Codex, Claude Code, and AGY.",
   "license": "Apache-2.0",
   "scripts": {
     "test": "cd plugins/claude-router && node --test tests/*.test.mjs",

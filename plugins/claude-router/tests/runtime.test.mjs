@@ -4,9 +4,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { buildEnv, initGitRepo, installFakeClaude, makeTempDir, run } from "./helpers.mjs";
+import { upsertJob } from "../scripts/lib/state.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = path.join(ROOT, "scripts", "claude-companion.mjs");
+const PLUGIN = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
 
 test("setup reports ready with fake claude", () => {
   const bin = makeTempDir();
@@ -26,7 +28,7 @@ test("surface reports local claude help", () => {
   const result = run("node", [SCRIPT, "surface", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
-  assert.equal(payload.router.version, "2.1.1");
+  assert.equal(payload.router.version, PLUGIN.version);
   assert.match(payload.version.stdout, /2.1.185/);
   assert.match(payload.help.stdout, /Usage: claude/);
 });
@@ -38,7 +40,7 @@ test("version reports both Claude Router and Claude CLI versions", () => {
   const result = run("node", [SCRIPT, "version", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
-  assert.equal(payload.router.version, "2.1.1");
+  assert.equal(payload.router.version, PLUGIN.version);
   assert.match(payload.claude.stdout, /2.1.185/);
 });
 
@@ -47,6 +49,7 @@ test("top-level help reports Claude Router commands", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /# Claude Router/);
   assert.match(result.stdout, /models\s+Show model selectors/);
+  assert.match(result.stdout, /cli\s+Alias for raw Claude CLI args/);
   assert.match(result.stdout, /version\s+Show Claude Router/);
 });
 
@@ -88,6 +91,10 @@ test("raw claude command can read help and blocks mutating commands by default",
   const blockedAlias = run("node", [SCRIPT, "raw", "--json", "--", "plugins", "install", "example"], { cwd: ROOT, env: buildEnv(bin, data) });
   assert.notEqual(blockedAlias.status, 0);
   assert.match(blockedAlias.stderr, /may mutate/);
+
+  const blockedMcpLogin = run("node", [SCRIPT, "raw", "--json", "--", "mcp", "login", "example"], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.notEqual(blockedMcpLogin.status, 0);
+  assert.match(blockedMcpLogin.stderr, /may mutate/);
 });
 
 test("analyze stores completed job and context pack", () => {
@@ -137,6 +144,51 @@ test("status and result return stored jobs", () => {
   assert.equal(result.status, 0, result.stderr);
   const resultPayload = JSON.parse(result.stdout);
   assert.equal(resultPayload.status, "completed");
+});
+
+test("status truncates long job lists unless --all is provided", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const env = buildEnv(bin, data);
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = data;
+  try {
+    for (let index = 0; index < 25; index += 1) {
+      const timestamp = new Date(Date.UTC(2026, 0, 1, 0, index, 0)).toISOString();
+      upsertJob(repo, {
+        id: `job-${String(index).padStart(2, "0")}`,
+        mode: "analyze",
+        kindLabel: "Analyze",
+        status: "completed",
+        phase: "done",
+        createdAt: timestamp,
+        updatedAt: timestamp
+      });
+    }
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+  }
+
+  const compact = run("node", [SCRIPT, "status", "--json"], { cwd: repo, env });
+  assert.equal(compact.status, 0, compact.stderr);
+  const compactPayload = JSON.parse(compact.stdout);
+  assert.equal(compactPayload.jobs.length, 20);
+  assert.equal(compactPayload.truncated, true);
+  assert.equal(compactPayload.total, 25);
+
+  const all = run("node", [SCRIPT, "status", "--json", "--all"], { cwd: repo, env });
+  assert.equal(all.status, 0, all.stderr);
+  const allPayload = JSON.parse(all.stdout);
+  assert.equal(allPayload.jobs.length, 25);
+  assert.equal(allPayload.truncated, false);
+  assert.equal(allPayload.total, 25);
 });
 
 test("background job can be waited for", () => {

@@ -26,10 +26,12 @@ const ROUTER_COMMANDS = [
   { name: "version", summary: "Show Claude Router and installed Claude CLI versions." },
   { name: "models", summary: "Show model selectors discovered from installed Claude CLI help plus curated controls." },
   { name: "raw", summary: "Run raw Claude CLI args with mutation and dangerous-permission guardrails." },
+  { name: "cli", summary: "Alias for raw Claude CLI args with the same guardrails." },
   { name: "analyze", summary: "Run read-only Claude analysis in print mode." },
   { name: "plan", summary: "Run read-only Claude planning in print mode." },
   { name: "exec", summary: "Run write-capable Claude execution in print mode." },
   { name: "review", summary: "Run read-only Claude review in print mode." },
+  { name: "adversarial-review", summary: "Run read-only Claude challenge review in print mode." },
   { name: "ultrareview", summary: "Run Claude's cloud-hosted ultrareview command." },
   { name: "status", summary: "List or inspect Claude Router jobs." },
   { name: "result", summary: "Show a stored Claude Router job result." },
@@ -213,6 +215,7 @@ function routerHelpPayload() {
       "claude-companion.mjs models",
       "claude-companion.mjs help mcp add",
       "claude-companion.mjs analyze --model fable \"inspect this repository\"",
+      "claude-companion.mjs adversarial-review \"challenge this design\"",
       "claude-companion.mjs exec --background \"implement the narrow fix\""
     ]
   };
@@ -299,7 +302,7 @@ function rawCommandClassification(args) {
       first === "auth" && ["login", "logout"].includes(second),
       first === "setup-token",
       ["install", "update", "upgrade"].includes(first),
-      first === "mcp" && ["add", "add-json", "add-from-claude-desktop", "remove", "reset-project-choices"].includes(second),
+      first === "mcp" && ["add", "add-json", "add-from-claude-desktop", "login", "logout", "remove", "reset-project-choices"].includes(second),
       pluginCommand && ["init", "new", "install", "i", "enable", "disable", "uninstall", "remove", "update", "prune", "autoremove"].includes(second),
       pluginCommand && second === "marketplace" && ["add", "remove", "rm", "update"].includes(third),
       pluginCommand && second === "tag" && !dryRun,
@@ -335,8 +338,8 @@ async function handleSurface(argv) {
     router: {
       name: "claude-router",
       version: PLUGIN_VERSION,
-      curatedTools: ["setup", "analyze", "plan", "exec", "review", "ultrareview", "status", "result", "cancel", "models"],
-      fullSurfaceTools: ["surface", "help", "raw", "version"],
+      curatedTools: ["setup", "analyze", "plan", "exec", "review", "adversarial-review", "ultrareview", "status", "result", "cancel", "models"],
+      fullSurfaceTools: ["surface", "help", "raw", "cli", "version"],
       note: "Use curated tools for managed print-mode jobs. Use help/raw for Claude CLI features not represented as curated tools."
     },
     version: commandPayload(version),
@@ -505,20 +508,21 @@ async function main() {
     await handleSurface(argv);
   } else if (command === "help") {
     await handleHelp(argv);
-  } else if (command === "raw") {
+  } else if (command === "raw" || command === "cli") {
     await handleRawClaude(argv);
-  } else if (["analyze", "plan", "exec", "review"].includes(command)) {
+  } else if (["analyze", "plan", "exec", "review", "adversarial-review"].includes(command)) {
     await handleRouted(command, argv);
   } else if (command === "run-job") {
     await handleRunJob(argv);
   } else if (command === "ultrareview") {
     await handleUltrareview(argv);
   } else if (command === "status") {
-    const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd", "timeout-ms", "poll-interval-ms"], booleanOptions: ["json", "wait"] });
+    const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd", "timeout-ms", "poll-interval-ms"], booleanOptions: ["json", "wait", "all"] });
     await handleStatus(resolveWorkspaceRoot(resolveCwd(options)), {
       reference: positionals[0] ?? "",
       json: Boolean(options.json),
       wait: Boolean(options.wait),
+      all: Boolean(options.all),
       timeoutMs: options["timeout-ms"],
       pollIntervalMs: options["poll-interval-ms"]
     });

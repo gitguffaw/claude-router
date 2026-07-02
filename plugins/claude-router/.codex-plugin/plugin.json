@@ -1,7 +1,7 @@
 {
   "name": "claude-router",
-  "version": "2.1.1",
-  "description": "Route Codex work through the local Claude CLI with policy-backed modes, job tracking, and result handling.",
+  "version": "2.2.0",
+  "description": "Route host-agent work through the local Claude CLI with policy-backed modes, job tracking, and result handling.",
   "author": {
     "name": "Compound"
   },
@@ -18,8 +18,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Claude Router",
-    "shortDescription": "Delegate Codex work to Claude CLI",
-    "longDescription": "Claude Router lets Codex invoke the local Claude CLI through explicit modes for analysis, planning, execution, review, setup, background jobs, status, results, and cancellation.",
+    "shortDescription": "Delegate work to Claude CLI",
+    "longDescription": "Claude Router lets host agents invoke the local Claude CLI through explicit modes for analysis, planning, execution, review, adversarial review, setup, model discovery, background jobs, status, results, and cancellation.",
     "developerName": "Compound",
     "category": "Developer Tools",
     "capabilities": [

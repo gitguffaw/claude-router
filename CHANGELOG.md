@@ -2,6 +2,14 @@
 
 All notable changes to Claude Router are documented here.
 
+## [2.2.0] — 2026-07-02
+
+### Added
+
+- Claude Code plugin marketplace metadata and plugin manifest for installing Claude Router directly into Claude Code.
+- `/claude-router:*` command palette files for setup, version, models, surface, help, analyze, plan, exec, review, adversarial-review, ultrareview, status, result, cancel, raw, and cli.
+- `adversarial-review` routed mode for read-only challenge reviews of approach, assumptions, and design tradeoffs.
+
 ## [2.1.1] — 2026-07-02
 
 ### Added

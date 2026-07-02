@@ -20,11 +20,14 @@ Prefer the plugin MCP tools when available:
 - `claude_router_plan`
 - `claude_router_exec`
 - `claude_router_review`
+- `claude_router_adversarial_review`
 - `claude_router_ultrareview`
 - `claude_router_status`
 - `claude_router_result`
 - `claude_router_cancel`
 - `claude_router_models`
+
+In Claude Code itself, the plugin also exposes `/claude-router:*` commands for setup, version, models, surface, help, analyze, plan, exec, review, adversarial-review, ultrareview, status, result, cancel, raw, and cli.
 
 If the MCP tools are unavailable during local development, use exactly one direct runtime command:
 
@@ -45,6 +48,7 @@ Do not replace a failed Claude run with a Codex-generated substitute answer.
 - `plan`: read-only implementation or migration plan
 - `exec`: write-capable implementation; use only when the user wants Claude to make changes
 - `review`: read-only local review; findings first and no auto-fixes
+- `adversarial-review`: read-only challenge review of approach, assumptions, and design tradeoffs
 - `ultrareview`: wraps Claude's cloud-hosted `ultrareview` command
 
 ## Controls

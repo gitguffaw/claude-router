@@ -38,6 +38,7 @@ test("mcp server lists tools", async () => {
     assert.ok(list.result.tools.some((tool) => tool.name === "claude_router_surface"));
     assert.ok(list.result.tools.some((tool) => tool.name === "claude_router_help"));
     assert.ok(list.result.tools.some((tool) => tool.name === "claude_router_raw"));
+    assert.ok(list.result.tools.some((tool) => tool.name === "claude_router_adversarial_review"));
   } finally {
     proc.kill("SIGTERM");
   }

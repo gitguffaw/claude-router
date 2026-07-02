@@ -18,6 +18,14 @@ test("exec is write-capable", () => {
   assert.equal(request.permissionMode, "acceptEdits");
 });
 
+test("adversarial-review is read-only and challenges approach", () => {
+  const request = buildRouterRequest({ mode: "adversarial-review", prompt: "review this", options: {} });
+  assert.equal(request.write, false);
+  assert.equal(request.permissionMode, "plan");
+  assert.match(request.prompt, /Challenge the implementation approach/);
+  assert.match(request.prompt, /Do not edit files or apply fixes/);
+});
+
 test("model and effort controls normalize", () => {
   const request = buildRouterRequest({ mode: "analyze", prompt: "x", options: { best: true, effort: "xhigh", "long-context": true } });
   assert.equal(request.controls.model, "opus[1m]");
@@ -52,4 +60,9 @@ test("managed print jobs pass through advanced claude controls", () => {
 test("unsupported web search and dangerous permissions fail clearly", () => {
   assert.throws(() => buildRouterRequest({ mode: "analyze", prompt: "x", options: { search: true } }), /native generic web-search/);
   assert.throws(() => buildRouterRequest({ mode: "exec", prompt: "x", options: { "dangerously-skip-permissions": true } }), /Dangerous permission/);
+});
+
+test("review target flags fail instead of pretending to scope the review", () => {
+  assert.throws(() => buildRouterRequest({ mode: "review", prompt: "x", options: { base: "main" } }), /does not yet support --base or --scope/);
+  assert.throws(() => buildRouterRequest({ mode: "adversarial-review", prompt: "x", options: { scope: "src" } }), /does not yet support --base or --scope/);
 });

@@ -1,0 +1,21 @@
+{
+  "name": "claude-router",
+  "displayName": "Claude Router",
+  "version": "2.2.0",
+  "description": "Route host-agent work through the local Claude CLI with live model discovery, reliable jobs, and explicit policy controls.",
+  "author": {
+    "name": "Compound"
+  },
+  "homepage": "https://github.com/gitguffaw/claude-router#readme",
+  "repository": "https://github.com/gitguffaw/claude-router",
+  "license": "Apache-2.0",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "codex",
+    "agy",
+    "models",
+    "review",
+    "delegation"
+  ]
+}

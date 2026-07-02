@@ -20,7 +20,7 @@ async function waitForJob(cwd, reference, options = {}) {
   return { ...job, waitTimedOut: isActiveJobStatus(job.status) };
 }
 
-export async function handleStatus(cwd, { reference = "", json = false, wait = false, timeoutMs = null, pollIntervalMs = null } = {}) {
+export async function handleStatus(cwd, { reference = "", json = false, wait = false, all = false, timeoutMs = null, pollIntervalMs = null } = {}) {
   if (reference) {
     const job = wait ? await waitForJob(cwd, reference, { timeoutMs, pollIntervalMs }) : readFullJob(cwd, reference);
     output(json ? job : renderJobStatus(job), json);
@@ -29,8 +29,9 @@ export async function handleStatus(cwd, { reference = "", json = false, wait = f
   if (wait) {
     throw new Error("status --wait requires a job id.");
   }
-  const jobs = sortJobsNewestFirst(listJobs(cwd)).slice(0, 20);
-  output(json ? { jobs } : renderStatusReport(jobs), json);
+  const jobs = sortJobsNewestFirst(listJobs(cwd));
+  const visibleJobs = all ? jobs : jobs.slice(0, 20);
+  output(json ? { jobs: visibleJobs, truncated: !all && jobs.length > visibleJobs.length, total: jobs.length } : renderStatusReport(visibleJobs), json);
 }
 
 export function handleResult(cwd, { reference = "", json = false } = {}) {

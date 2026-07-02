@@ -466,8 +466,8 @@ async function handleRouted(mode, argv) {
   writeJobFile(workspaceRoot, jobId, job);
 
   if (options.background) {
-    const pid = spawnDetached(process.execPath, [SCRIPT, "run-job", "--cwd", workspaceRoot, jobId], { cwd: workspaceRoot, env: process.env });
-    const backgroundJob = { ...job, status: "running", phase: "background", pid };
+    const processRecord = spawnDetached(process.execPath, [SCRIPT, "run-job", "--cwd", workspaceRoot, jobId], { cwd: workspaceRoot, env: process.env });
+    const backgroundJob = { ...job, status: "running", phase: "background", pid: processRecord.pid, processStartTime: processRecord.processStartTime };
     upsertJob(workspaceRoot, backgroundJob);
     writeJobFile(workspaceRoot, jobId, backgroundJob);
     output(options.json ? backgroundJob : renderStartedJob(backgroundJob), Boolean(options.json));
@@ -564,7 +564,7 @@ async function main() {
     handleResult(resolveWorkspaceRoot(resolveCwd(options)), { reference: positionals[0] ?? "", json: Boolean(options.json) });
   } else if (command === "cancel") {
     const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
-    handleCancel(resolveWorkspaceRoot(resolveCwd(options)), { reference: positionals[0] ?? "", json: Boolean(options.json) });
+    await handleCancel(resolveWorkspaceRoot(resolveCwd(options)), { reference: positionals[0] ?? "", json: Boolean(options.json) });
   } else if (command === "models") {
     await handleModels(argv);
   } else {

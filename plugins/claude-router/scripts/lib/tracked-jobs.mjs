@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { currentProcessRecord } from "./process.mjs";
 import { readJobFile, resolveJobLogFile, upsertJob, writeJobFile } from "./state.mjs";
 
 export const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
@@ -39,7 +40,8 @@ export function appendLogLine(logFile, message) {
 }
 
 export async function runTrackedJob(job, runner) {
-  const running = { ...job, status: "running", phase: "running", startedAt: nowIso(), pid: process.pid };
+  const processRecord = currentProcessRecord();
+  const running = { ...job, status: "running", phase: "running", startedAt: nowIso(), pid: processRecord.pid, processStartTime: processRecord.processStartTime };
   upsertJob(job.workspaceRoot, running);
   writeJobFile(job.workspaceRoot, job.id, running);
   try {

@@ -2,6 +2,14 @@
 
 All notable changes to Claude Router are documented here.
 
+## [2.2.2] — 2026-07-02
+
+### Fixed
+
+- Added PID identity records with process start time for background jobs so cancellation does not signal a reused PID.
+- Added stale active-job detection during `status` and `result`, marking unverifiable/stale process records failed instead of leaving them running forever.
+- Added SIGTERM-to-SIGKILL process-group escalation with bounded polling for background job cancellation and foreground timeouts.
+
 ## [2.2.1] — 2026-07-02
 
 ### Fixed

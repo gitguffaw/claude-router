@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { buildEnv, initGitRepo, installFakeClaude, makeTempDir, run } from "./helpers.mjs";
-import { upsertJob } from "../scripts/lib/state.mjs";
+import { upsertJob, writeJobFile } from "../scripts/lib/state.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = path.join(ROOT, "scripts", "claude-companion.mjs");
@@ -276,6 +276,95 @@ test("status and result return stored jobs", () => {
   assert.match(completedCancel.stderr, /Cannot cancel job/);
 });
 
+test("cancel refuses active jobs whose recorded PID identity is stale", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const env = buildEnv(bin, data);
+  const staleJob = {
+    id: "stale-job",
+    jobClass: "claude",
+    kindLabel: "Analyze",
+    mode: "analyze",
+    title: "stale",
+    summary: "stale",
+    workspaceRoot: repo,
+    status: "running",
+    phase: "running",
+    pid: process.pid,
+    processStartTime: "Mon Jan  1 00:00:00 1990",
+    logFile: null
+  };
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = data;
+  try {
+    upsertJob(repo, staleJob);
+    writeJobFile(repo, staleJob.id, staleJob);
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+  }
+
+  const cancelled = run("node", [SCRIPT, "cancel", "--json", staleJob.id], { cwd: repo, env });
+  assert.notEqual(cancelled.status, 0);
+  assert.match(cancelled.stderr, /recorded process/);
+  const result = run("node", [SCRIPT, "result", "--json", staleJob.id], { cwd: repo, env });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.phase, "stale-process");
+  assert.equal(payload.pid, null);
+  assert.equal(payload.cancelSignal.attempted, false);
+});
+
+test("status marks stale active jobs failed instead of leaving them running", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const env = buildEnv(bin, data);
+  const staleJob = {
+    id: "stale-status-job",
+    jobClass: "claude",
+    kindLabel: "Analyze",
+    mode: "analyze",
+    title: "stale",
+    summary: "stale",
+    workspaceRoot: repo,
+    status: "running",
+    phase: "running",
+    pid: process.pid,
+    processStartTime: "Mon Jan  1 00:00:00 1990",
+    logFile: null
+  };
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = data;
+  try {
+    upsertJob(repo, staleJob);
+    writeJobFile(repo, staleJob.id, staleJob);
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+  }
+
+  const status = run("node", [SCRIPT, "status", "--json", staleJob.id], { cwd: repo, env });
+  assert.equal(status.status, 0, status.stderr);
+  const payload = JSON.parse(status.stdout);
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.phase, "stale-process");
+  assert.equal(payload.pid, null);
+  assert.equal(payload.processVerification.reason, "pid-reused");
+});
+
 test("status truncates long job lists unless --all is provided", () => {
   const repo = makeTempDir();
   const bin = makeTempDir();
@@ -332,6 +421,11 @@ test("background job can be waited for", () => {
   assert.equal(started.status, 0, started.stderr);
   const startPayload = JSON.parse(started.stdout);
   assert.equal(startPayload.status, "running");
+  assert.equal(typeof startPayload.pid, "number");
+  if (process.platform !== "win32") {
+    assert.equal(typeof startPayload.processStartTime, "string");
+    assert.ok(startPayload.processStartTime.length > 0);
+  }
   const status = run("node", [SCRIPT, "status", "--json", "--wait", "--timeout-ms", "5000", startPayload.id], { cwd: repo, env });
   assert.equal(status.status, 0, status.stderr);
   const statusPayload = JSON.parse(status.stdout);

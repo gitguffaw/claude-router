@@ -35,13 +35,17 @@ Avoid: generated prompt only.
 - The AGY Host Adapter instructs AGY to invoke the Claude Router Core.
 - The Claude Router Core invokes the Claude CLI.
 - Policy Docs define routing intent; runtime code enforces deterministic behavior.
-- The Model Catalog provides static discovery data for the tools and companion modes exposed by host adapters.
+- The Model Catalog combines live model selector discovery from the installed Claude CLI with curated metadata for stable controls exposed by host adapters.
 
 ## Model Catalog Language
 
 **Model Catalog**:
-The static, curated data set describing available Claude model tiers, effort levels, modifiers, permission modes, and presets. Returned by `getModelCatalog()` and exposed through the `claude_router_models` tool and `models` companion mode.
-Avoid: live discovery, dynamic model probing, account-specific availability.
+The data set returned by `getModelCatalog()` and exposed through the `claude_router_models` tool and `models` companion mode. It includes live `--model` selectors parsed from installed Claude CLI help plus curated model tiers, effort levels, modifiers, permission modes, and presets.
+Avoid: treating curated tiers as the complete list of accepted model selectors.
+
+**Model Selector**:
+A value accepted by Claude's `--model` flag, such as `fable`, `opus`, `sonnet`, or a full model name such as `claude-fable-5`. Selectors can appear in the live `models` catalog section even when no curated tier metadata exists yet.
+Avoid: assuming every selector has known context, cost, or capability metadata.
 
 **Model Tier**:
 One of haiku, sonnet, or opus. Each tier has a flag (e.g. `--opus`), context window, optional long-context support, and a cost tier.
@@ -60,7 +64,7 @@ Controls what Claude can do during a session. Modes: default (interactive approv
 Avoid: auth mode, access level.
 
 **Capability Filter**:
-An optional parameter (`capability`) on the `claude_router_models` tool and `models --capability` CLI flag. Filters the catalog's tiers to those supporting a specific capability. Valid values: long_context, ultrathink, chrome.
+An optional parameter (`capability`) on the `claude_router_models` tool and `models --capability` CLI flag. Filters known tiers and model selectors to those supporting a specific capability. Valid values: long_context, ultrathink, chrome. Unknown live selectors are omitted for tier-specific filters when support is not known.
 Avoid: model filter, tier search.
 
 **Preset**:

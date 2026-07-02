@@ -14,6 +14,7 @@ Prefer the plugin MCP tools when available:
 - `claude_router_setup`
 - `claude_router_surface`
 - `claude_router_help`
+- `claude_router_version`
 - `claude_router_raw`
 - `claude_router_analyze`
 - `claude_router_plan`
@@ -23,6 +24,7 @@ Prefer the plugin MCP tools when available:
 - `claude_router_status`
 - `claude_router_result`
 - `claude_router_cancel`
+- `claude_router_models`
 
 If the MCP tools are unavailable during local development, use exactly one direct runtime command:
 
@@ -35,7 +37,9 @@ Do not replace a failed Claude run with a Codex-generated substitute answer.
 ## Modes
 
 - `surface`: report installed Claude version, top-level help, and router coverage
-- `help`: show installed Claude help for a command path before using less-common features
+- `help`: show Claude Router help, or installed Claude help when a command path is provided
+- `version`: report Claude Router and installed Claude CLI versions
+- `models`: report live Claude model selectors plus curated effort, permission, modifier, and preset metadata
 - `raw`: run a raw Claude CLI command with mutation and dangerous-permission guardrails
 - `analyze`: read-only facts, tradeoffs, recommendations, and next action
 - `plan`: read-only implementation or migration plan
@@ -45,7 +49,7 @@ Do not replace a failed Claude run with a Codex-generated substitute answer.
 
 ## Controls
 
-- `--model <model>` passes through to Claude.
+- `--model <model>` passes through to Claude. Use `claude_router_models` or `models` to discover live selectors from the installed Claude CLI.
 - `--best` maps to `opus`.
 - `--sonnet`, `--opus`, and `--haiku` are convenience selectors.
 - `--effort <low|medium|high|xhigh|max>` passes through to Claude.

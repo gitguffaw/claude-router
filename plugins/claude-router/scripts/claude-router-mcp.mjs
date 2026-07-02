@@ -13,7 +13,8 @@ const PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin
 const tools = [
   { name: "claude_router_setup", description: "Check local Claude CLI setup.", command: "setup" },
   { name: "claude_router_surface", description: "Report the local Claude CLI version, top-level help, and Claude Router coverage.", command: "surface" },
-  { name: "claude_router_help", description: "Show local Claude CLI help for a command path.", command: "help" },
+  { name: "claude_router_help", description: "Show Claude Router help, or local Claude CLI help when args are provided.", command: "help" },
+  { name: "claude_router_version", description: "Show Claude Router and installed Claude CLI versions.", command: "version" },
   { name: "claude_router_raw", description: "Run a raw Claude CLI command with guardrails for mutating and dangerous operations.", command: "raw" },
   { name: "claude_router_analyze", description: "Run read-only Claude analysis.", command: "analyze", prompt: true },
   { name: "claude_router_plan", description: "Run read-only Claude planning.", command: "plan", prompt: true },
@@ -23,7 +24,7 @@ const tools = [
   { name: "claude_router_status", description: "Show Claude Router jobs.", command: "status" },
   { name: "claude_router_result", description: "Show Claude Router job result.", command: "result" },
   { name: "claude_router_cancel", description: "Cancel a Claude Router job.", command: "cancel" },
-  { name: "claude_router_models", description: "Return the catalog of available Claude models, effort levels, and modifier flags", command: "models" }
+  { name: "claude_router_models", description: "Return live Claude model selectors plus curated effort levels and modifier flags.", command: "models" }
 ];
 
 const ROUTED_COMMANDS = new Set(["analyze", "plan", "exec", "review"]);
@@ -131,10 +132,15 @@ function schemaFor(tool) {
       type: "object",
       additionalProperties: false,
       properties: {
+        cwd: { type: "string" },
         capability: {
           type: "string",
           enum: ["long_context", "ultrathink", "chrome"],
           description: "Filter models to those supporting a specific capability."
+        },
+        static: {
+          type: "boolean",
+          description: "Skip live Claude CLI help discovery and return only curated model data."
         }
       },
       required: []
@@ -233,6 +239,9 @@ function callTool(name, input = {}) {
   } else if (tool.command === "models") {
     if (input.capability) {
       args.push("--capability", input.capability);
+    }
+    if (input.static) {
+      args.push("--static");
     }
   } else if (input.job_id) {
     args.push(input.job_id);

@@ -26,8 +26,28 @@ test("surface reports local claude help", () => {
   const result = run("node", [SCRIPT, "surface", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
+  assert.equal(payload.router.version, "2.1.0");
   assert.match(payload.version.stdout, /2.1.185/);
   assert.match(payload.help.stdout, /Usage: claude/);
+});
+
+test("version reports both Claude Router and Claude CLI versions", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  const result = run("node", [SCRIPT, "version", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.router.version, "2.1.0");
+  assert.match(payload.claude.stdout, /2.1.185/);
+});
+
+test("top-level help reports Claude Router commands", () => {
+  const result = run("node", [SCRIPT, "--help"], { cwd: ROOT });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /# Claude Router/);
+  assert.match(result.stdout, /models\s+Show model selectors/);
+  assert.match(result.stdout, /version\s+Show Claude Router/);
 });
 
 test("help reports subcommand help as json", () => {
@@ -38,6 +58,19 @@ test("help reports subcommand help as json", () => {
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.match(payload.stdout, /Usage: claude/);
+});
+
+test("models command includes live Fable selector from Claude help", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  const result = run("node", [SCRIPT, "models", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.discovery.status, "available");
+  const fable = payload.models.find((model) => model.selector === "fable");
+  assert.ok(fable, "fable selector missing");
+  assert.equal(fable.full_name, "claude-fable-5");
 });
 
 test("raw claude command can read help and blocks mutating commands by default", () => {

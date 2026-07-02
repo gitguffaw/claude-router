@@ -3,12 +3,19 @@
   "$id": "https://github.com/gitguffaw/claude-router/schemas/models-output.schema.json",
   "title": "Claude Router Models Catalog",
   "type": "object",
-  "required": ["catalog_version", "tiers", "effort_levels", "modifiers", "permission_modes", "presets"],
+  "required": ["catalog_version", "discovery", "models", "tiers", "effort_levels", "modifiers", "permission_modes", "presets"],
   "additionalProperties": false,
   "properties": {
     "catalog_version": {
       "type": "string",
       "description": "Semver of the catalog data."
+    },
+    "discovery": {
+      "$ref": "#/$defs/ModelDiscovery"
+    },
+    "models": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ModelOption" }
     },
     "tiers": {
       "type": "array",
@@ -32,6 +39,47 @@
     }
   },
   "$defs": {
+    "ModelDiscovery": {
+      "type": "object",
+      "required": ["status", "source", "claude_version", "selectors", "aliases", "full_names", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["available", "no-model-data", "not-run", "unavailable"] },
+        "source": { "type": "string" },
+        "claude_version": { "type": ["string", "null"] },
+        "selectors": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "full_names": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "error": { "type": ["string", "null"] }
+      }
+    },
+    "ModelOption": {
+      "type": "object",
+      "required": ["id", "selector", "display_name", "full_name", "aliases", "source", "tier", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "selector": { "type": "string" },
+        "display_name": { "type": "string" },
+        "full_name": { "type": ["string", "null"] },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "source": { "type": "string", "enum": ["curated", "claude-help", "curated+claude-help"] },
+        "tier": { "type": ["string", "null"] },
+        "notes": { "type": "string" }
+      }
+    },
     "ModelTier": {
       "type": "object",
       "required": ["id", "flag", "display_name", "context_window", "long_context_window", "supports_ultrathink", "supports_long_context", "cost_tier", "notes"],

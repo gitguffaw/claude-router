@@ -13,7 +13,8 @@ import {
   MODIFIERS,
   PERMISSION_MODES,
   PRESETS,
-  getModelCatalog
+  getModelCatalog,
+  parseClaudeHelpModels
 } from "../scripts/lib/model-catalog.mjs";
 import { renderModelCatalog } from "../scripts/lib/render.mjs";
 
@@ -29,6 +30,7 @@ const MODELS_SCHEMA = JSON.parse(
 const VALID_TIER_IDS = new Set(["haiku", "sonnet", "opus"]);
 // Valid effort ids from model-resolution.mjs
 const VALID_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+const CLAUDE_HELP_WITH_FABLE = "Usage: claude [options]\nOptions:\n  --model <model>  Model for the current session. Provide an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g. 'claude-fable-5').\n  --name <name>  Set a display name\n";
 
 // ── Unit tests for getModelCatalog() ──────────────────────────────────────────
 
@@ -36,15 +38,35 @@ test("getModelCatalog returns full catalog with all sections when called with no
   const catalog = getModelCatalog();
   assert.ok(catalog.catalog_version);
   assert.ok(Array.isArray(catalog.tiers));
+  assert.ok(Array.isArray(catalog.models));
   assert.ok(Array.isArray(catalog.effort_levels));
   assert.ok(Array.isArray(catalog.modifiers));
   assert.ok(Array.isArray(catalog.permission_modes));
   assert.ok(Array.isArray(catalog.presets));
   assert.equal(catalog.tiers.length, MODEL_TIERS.length);
+  assert.equal(catalog.discovery.status, "not-run");
   assert.equal(catalog.effort_levels.length, EFFORT_LEVELS.length);
   assert.equal(catalog.modifiers.length, MODIFIERS.length);
   assert.equal(catalog.permission_modes.length, PERMISSION_MODES.length);
   assert.equal(catalog.presets.length, PRESETS.length);
+});
+
+test("parseClaudeHelpModels extracts model aliases and full names from Claude help", () => {
+  const parsed = parseClaudeHelpModels(CLAUDE_HELP_WITH_FABLE);
+  assert.deepEqual(parsed.aliases, ["fable", "opus", "sonnet"]);
+  assert.deepEqual(parsed.full_names, ["claude-fable-5"]);
+});
+
+test("getModelCatalog merges live Claude model selectors with curated tiers", () => {
+  const catalog = getModelCatalog({ claudeHelp: CLAUDE_HELP_WITH_FABLE, claudeVersion: "2.1.198 (Claude Code)" });
+  assert.equal(catalog.discovery.status, "available");
+  assert.deepEqual(catalog.discovery.aliases, ["fable", "opus", "sonnet"]);
+  const fable = catalog.models.find((model) => model.selector === "fable");
+  assert.ok(fable, "fable model selector missing");
+  assert.equal(fable.full_name, "claude-fable-5");
+  assert.equal(fable.source, "claude-help");
+  const opus = catalog.models.find((model) => model.selector === "opus");
+  assert.equal(opus.source, "curated+claude-help");
 });
 
 test("catalog_version is a valid semver string", () => {
@@ -164,6 +186,8 @@ test("claude_router_models appears in tools/list response", async () => {
     const list = await request(proc, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
     const modelsTool = list.result.tools.find((tool) => tool.name === "claude_router_models");
     assert.ok(modelsTool, "claude_router_models not found in tools/list");
+    const versionTool = list.result.tools.find((tool) => tool.name === "claude_router_version");
+    assert.ok(versionTool, "claude_router_version not found in tools/list");
   } finally {
     proc.kill("SIGTERM");
   }
@@ -183,6 +207,8 @@ test("claude_router_models tool schema includes capability enum parameter", asyn
       "ultrathink",
       "chrome"
     ]);
+    assert.ok(modelsTool.inputSchema.properties.cwd, "cwd property missing from schema");
+    assert.ok(modelsTool.inputSchema.properties.static, "static property missing from schema");
   } finally {
     proc.kill("SIGTERM");
   }

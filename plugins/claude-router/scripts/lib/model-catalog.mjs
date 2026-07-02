@@ -1,4 +1,4 @@
-export const CATALOG_VERSION = "1.0.0";
+export const CATALOG_VERSION = "1.1.0";
 
 export const MODEL_TIERS = [
   {
@@ -127,9 +127,184 @@ export const PRESETS = [
 
 const VALID_CAPABILITIES = new Set(["long_context", "ultrathink", "chrome"]);
 
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function normalizeSelector(selector) {
+  return String(selector ?? "").trim().toLowerCase();
+}
+
+function selectorId(selector) {
+  return normalizeSelector(selector).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function displayNameForSelector(selector) {
+  const normalized = normalizeSelector(selector);
+  const curated = MODEL_TIERS.find((tier) => tier.id === normalized);
+  if (curated) {
+    return curated.display_name;
+  }
+  const withoutPrefix = normalized.startsWith("claude-") ? normalized.slice("claude-".length) : normalized;
+  const words = withoutPrefix
+    .replace(/\[[^\]]+\]/g, "")
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`);
+  return `Claude ${words.join(" ") || selector}`;
+}
+
+function looksLikeModelSelector(value) {
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]*(?:\[[A-Za-z0-9._:-]+\])?$/.test(value.replace(/-/g, "_"));
+}
+
+function extractOptionBlock(helpText, optionName) {
+  const lines = String(helpText ?? "").split(/\r?\n/);
+  const optionPattern = new RegExp(`(?:^|\\s|,)${optionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|,|$)`);
+  const start = lines.findIndex((line) => optionPattern.test(line));
+  if (start === -1) {
+    return "";
+  }
+  const block = [lines[start]];
+  for (const line of lines.slice(start + 1)) {
+    if (/^\s*(Arguments|Options|Commands):\s*$/.test(line)) {
+      break;
+    }
+    if (/^\s{0,4}(?:-[A-Za-z0-9],\s*)?--[A-Za-z0-9]/.test(line)) {
+      break;
+    }
+    block.push(line);
+  }
+  return block.join("\n").trim();
+}
+
+export function parseClaudeHelpModels(helpText) {
+  const modelBlock = extractOptionBlock(helpText, "--model");
+  const quotedValues = [];
+  const quotedPattern = /(?:^|[\s(,])['"]([A-Za-z0-9][A-Za-z0-9._:-]*(?:-[A-Za-z0-9._:-]+)*(?:\[[A-Za-z0-9._:-]+\])?)['"]/g;
+  let match;
+  while ((match = quotedPattern.exec(modelBlock)) !== null) {
+    quotedValues.push(match[1]);
+  }
+  const selectors = unique(quotedValues.map((value) => value.trim()).filter(looksLikeModelSelector));
+  const fullNames = selectors.filter((selector) => normalizeSelector(selector).startsWith("claude-"));
+  const aliases = selectors.filter((selector) => !normalizeSelector(selector).startsWith("claude-"));
+  return {
+    option_block: modelBlock,
+    selectors,
+    aliases,
+    full_names: fullNames
+  };
+}
+
+function inferFullNameForAlias(alias, fullNames) {
+  const normalized = normalizeSelector(alias);
+  return fullNames.find((name) => {
+    const fullName = normalizeSelector(name);
+    return fullName === `claude-${normalized}` ||
+      fullName.startsWith(`claude-${normalized}-`) ||
+      fullName.includes(`-${normalized}-`) ||
+      fullName.endsWith(`-${normalized}`);
+  }) ?? null;
+}
+
+function buildCuratedModelOptions() {
+  return MODEL_TIERS.map((tier) => ({
+    id: tier.id,
+    selector: tier.id,
+    display_name: tier.display_name,
+    full_name: null,
+    aliases: [tier.id],
+    source: "curated",
+    tier: tier.id,
+    notes: tier.notes
+  }));
+}
+
+function buildDiscoveredModelOptions(parsed) {
+  const pairedFullNames = new Set();
+  const options = [];
+  for (const alias of parsed.aliases) {
+    const fullName = inferFullNameForAlias(alias, parsed.full_names);
+    if (fullName) {
+      pairedFullNames.add(fullName);
+    }
+    options.push({
+      id: selectorId(alias),
+      selector: alias,
+      display_name: displayNameForSelector(alias),
+      full_name: fullName,
+      aliases: [alias],
+      source: "claude-help",
+      tier: MODEL_TIERS.some((tier) => tier.id === normalizeSelector(alias)) ? normalizeSelector(alias) : null,
+      notes: "Discovered from installed Claude CLI --model help."
+    });
+  }
+  for (const fullName of parsed.full_names) {
+    if (pairedFullNames.has(fullName)) {
+      continue;
+    }
+    options.push({
+      id: selectorId(fullName),
+      selector: fullName,
+      display_name: displayNameForSelector(fullName),
+      full_name: fullName,
+      aliases: [],
+      source: "claude-help",
+      tier: null,
+      notes: "Discovered from installed Claude CLI --model help."
+    });
+  }
+  return options;
+}
+
+function mergeModelOptions(curated, discovered) {
+  const merged = new Map(curated.map((model) => [normalizeSelector(model.selector), { ...model }]));
+  for (const model of discovered) {
+    const key = normalizeSelector(model.selector);
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { ...model });
+      continue;
+    }
+    merged.set(key, {
+      ...existing,
+      full_name: existing.full_name ?? model.full_name,
+      aliases: unique([...(existing.aliases ?? []), ...(model.aliases ?? [])]),
+      source: existing.source === model.source ? existing.source : `${existing.source}+${model.source}`,
+      notes: existing.notes
+    });
+  }
+  return [...merged.values()];
+}
+
+function filterModelsByCapability(models, capability, tiers) {
+  if (!capability) {
+    return models;
+  }
+  if (capability === "chrome") {
+    return models;
+  }
+  const allowedTiers = new Set(tiers.map((tier) => tier.id));
+  return models.filter((model) => model.tier && allowedTiers.has(model.tier));
+}
+
 export function getModelCatalog(options = {}) {
+  const parsedModels = parseClaudeHelpModels(options.claudeHelp ?? "");
+  const discoveryStatus = options.discoveryStatus ??
+    (options.claudeHelp ? (parsedModels.selectors.length ? "available" : "no-model-data") : "not-run");
   const catalog = {
     catalog_version: CATALOG_VERSION,
+    discovery: {
+      status: discoveryStatus,
+      source: options.claudeHelp ? "claude --help" : "curated",
+      claude_version: options.claudeVersion ?? null,
+      selectors: parsedModels.selectors,
+      aliases: parsedModels.aliases,
+      full_names: parsedModels.full_names,
+      error: options.discoveryError ?? null
+    },
+    models: mergeModelOptions(buildCuratedModelOptions(), buildDiscoveredModelOptions(parsedModels)),
     tiers: [...MODEL_TIERS],
     effort_levels: [...EFFORT_LEVELS],
     modifiers: [...MODIFIERS],
@@ -149,6 +324,7 @@ export function getModelCatalog(options = {}) {
         default: return true;
       }
     });
+    catalog.models = filterModelsByCapability(catalog.models, options.capability, catalog.tiers);
   }
 
   return catalog;

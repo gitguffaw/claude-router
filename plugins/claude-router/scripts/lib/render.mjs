@@ -100,12 +100,36 @@ export function renderModelCatalog(catalog) {
     "# Claude Router Model Catalog",
     "",
     `Catalog version: ${catalog.catalog_version}`,
-    "",
+    ""
+  ];
+  if (catalog.discovery) {
+    lines.push(
+      `Discovery: ${catalog.discovery.status} (${catalog.discovery.source})`,
+      `Claude CLI: ${catalog.discovery.claude_version ?? "unknown"}`,
+      ""
+    );
+    if (catalog.discovery.error) {
+      lines.push(`Discovery error: ${catalog.discovery.error}`, "");
+    }
+  }
+  if (Array.isArray(catalog.models)) {
+    lines.push(
+      "## Model Selectors",
+      "",
+      "| Selector | Full Name | Source | Notes |",
+      "| --- | --- | --- | --- |"
+    );
+    for (const model of catalog.models) {
+      lines.push(`| ${escapeCell(model.selector)} | ${escapeCell(model.full_name ?? "")} | ${escapeCell(model.source)} | ${escapeCell(model.notes)} |`);
+    }
+    lines.push("");
+  }
+  lines.push(
     "## Model Tiers",
     "",
     "| Tier | Flag | Context | Long Context | Ultrathink | Cost |",
     "| --- | --- | --- | --- | --- | --- |"
-  ];
+  );
   for (const tier of catalog.tiers) {
     lines.push(`| ${escapeCell(tier.display_name)} | ${escapeCell(tier.flag)} | ${escapeCell(tier.context_window)} | ${escapeCell(tier.long_context_window ?? "—")} | ${escapeCell(tier.supports_ultrathink ? "yes" : "no")} | ${escapeCell(tier.cost_tier)} |`);
   }

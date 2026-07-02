@@ -16,6 +16,25 @@ import { readGitStatus, resolveWorkspaceRoot } from "./lib/workspace.mjs";
 import { getModelCatalog } from "./lib/model-catalog.mjs";
 
 const SCRIPT = fileURLToPath(import.meta.url);
+const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8")).version;
+
+const ROUTER_COMMANDS = [
+  { name: "setup", summary: "Check Node, Claude CLI, auth, plugin, and MCP availability." },
+  { name: "surface", summary: "Show installed Claude CLI version/help plus Claude Router coverage." },
+  { name: "help", summary: "Show Claude Router help, or Claude CLI help when a command path is provided." },
+  { name: "version", summary: "Show Claude Router and installed Claude CLI versions." },
+  { name: "models", summary: "Show model selectors discovered from installed Claude CLI help plus curated controls." },
+  { name: "raw", summary: "Run raw Claude CLI args with mutation and dangerous-permission guardrails." },
+  { name: "analyze", summary: "Run read-only Claude analysis in print mode." },
+  { name: "plan", summary: "Run read-only Claude planning in print mode." },
+  { name: "exec", summary: "Run write-capable Claude execution in print mode." },
+  { name: "review", summary: "Run read-only Claude review in print mode." },
+  { name: "ultrareview", summary: "Run Claude's cloud-hosted ultrareview command." },
+  { name: "status", summary: "List or inspect Claude Router jobs." },
+  { name: "result", summary: "Show a stored Claude Router job result." },
+  { name: "cancel", summary: "Cancel an active Claude Router job." }
+];
 
 function normalizeArgv(argv) {
   if (argv.length === 1) {
@@ -170,6 +189,99 @@ function renderCommandPayload(title, payload) {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
+function commandText(payload) {
+  return (payload.stdout || payload.stderr || payload.error || `exit ${payload.status}`).trim();
+}
+
+function routerHelpPayload() {
+  return {
+    router: { name: "claude-router", version: PLUGIN_VERSION },
+    usage: [
+      "claude-companion.mjs [--help|-h]",
+      "claude-companion.mjs [--version|-v]",
+      "claude-companion.mjs <command> [args]"
+    ],
+    commands: ROUTER_COMMANDS,
+    model_controls: [
+      "--model <selector> passes any selector accepted by the installed Claude CLI, including aliases discovered from Claude help such as fable, opus, or sonnet.",
+      "--best resolves to --opus.",
+      "--sonnet, --opus, and --haiku are compatibility shortcuts.",
+      "--effort <low|medium|high|xhigh|max> controls reasoning depth."
+    ],
+    examples: [
+      "claude-companion.mjs version",
+      "claude-companion.mjs models",
+      "claude-companion.mjs help mcp add",
+      "claude-companion.mjs analyze --model fable \"inspect this repository\"",
+      "claude-companion.mjs exec --background \"implement the narrow fix\""
+    ]
+  };
+}
+
+function renderRouterHelp(payload) {
+  const lines = [
+    "# Claude Router",
+    "",
+    `Version: ${payload.router.version}`,
+    "",
+    "Usage:",
+    ...payload.usage.map((line) => `  ${line}`),
+    "",
+    "Commands:",
+    ...payload.commands.map((command) => `  ${command.name.padEnd(12)} ${command.summary}`),
+    "",
+    "Model controls:",
+    ...payload.model_controls.map((control) => `  - ${control}`),
+    "",
+    "Examples:",
+    ...payload.examples.map((example) => `  ${example}`)
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function handleRouterHelp(argv) {
+  const { options } = parseCommandInput(argv, { booleanOptions: ["json"] });
+  const payload = routerHelpPayload();
+  output(options.json ? payload : renderRouterHelp(payload), Boolean(options.json));
+}
+
+async function handleVersion(argv) {
+  const { options } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
+  const cwd = resolveCwd(options);
+  const version = runCommand("claude", ["--version"], { cwd });
+  const payload = {
+    router: { name: "claude-router", version: PLUGIN_VERSION },
+    claude: commandPayload(version)
+  };
+  if (options.json) {
+    output(payload, true);
+    return;
+  }
+  output([
+    `Claude Router: ${PLUGIN_VERSION}`,
+    `Claude CLI: ${commandText(payload.claude)}`,
+    ""
+  ].join("\n"), false);
+}
+
+function renderSurfacePayload(payload) {
+  const lines = [
+    "# Claude Router Surface",
+    "",
+    `Claude Router: ${payload.router.version}`,
+    `Claude CLI: ${commandText(payload.version)}`,
+    "",
+    "Router commands:",
+    `- Curated: ${payload.router.curatedTools.join(", ")}`,
+    `- Passthrough: ${payload.router.fullSurfaceTools.join(", ")}`,
+    `- ${payload.router.note}`
+  ];
+  if (payload.help.stdout || payload.help.stderr || payload.help.error) {
+    lines.push("", "Claude CLI help:", "```", commandText(payload.help), "```");
+  }
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
 function hasFlag(args, ...flags) {
   return args.some((arg) => flags.includes(arg) || flags.some((flag) => arg.startsWith(`${flag}=`)));
 }
@@ -220,15 +332,17 @@ async function handleSurface(argv) {
   const version = runCommand("claude", ["--version"], { cwd });
   const help = runCommand("claude", ["--help"], { cwd });
   const payload = {
-    version: commandPayload(version),
-    help: commandPayload(help),
     router: {
-      curatedTools: ["setup", "analyze", "plan", "exec", "review", "ultrareview", "status", "result", "cancel"],
-      fullSurfaceTools: ["surface", "help", "raw"],
+      name: "claude-router",
+      version: PLUGIN_VERSION,
+      curatedTools: ["setup", "analyze", "plan", "exec", "review", "ultrareview", "status", "result", "cancel", "models"],
+      fullSurfaceTools: ["surface", "help", "raw", "version"],
       note: "Use curated tools for managed print-mode jobs. Use help/raw for Claude CLI features not represented as curated tools."
-    }
+    },
+    version: commandPayload(version),
+    help: commandPayload(help)
   };
-  output(options.json ? payload : renderCommandPayload("Claude CLI Surface", payload.help), Boolean(options.json));
+  output(options.json ? payload : renderSurfacePayload(payload), Boolean(options.json));
 }
 
 async function handleClaudeHelp(argv) {
@@ -238,6 +352,20 @@ async function handleClaudeHelp(argv) {
   const result = runCommand("claude", args, { cwd });
   const payload = commandPayload(result);
   output(options.json ? payload : renderCommandPayload(`claude ${args.join(" ")}`, payload), Boolean(options.json));
+}
+
+async function handleHelp(argv) {
+  const { options, positionals } = parseCommandInput(argv, {
+    valueOptions: ["cwd"],
+    booleanOptions: ["json", "help"],
+    aliasMap: { h: "help" }
+  });
+  if (!positionals.length || options.help) {
+    const payload = routerHelpPayload();
+    output(options.json ? payload : renderRouterHelp(payload), Boolean(options.json));
+    return;
+  }
+  await handleClaudeHelp(argv);
 }
 
 async function handleRawClaude(argv) {
@@ -330,19 +458,45 @@ async function handleUltrareview(argv) {
 
 async function handleModels(argv) {
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["capability"],
-    booleanOptions: ["json"]
+    valueOptions: ["capability", "cwd"],
+    booleanOptions: ["json", "static"]
   });
+  const cwd = resolveCwd(options);
+  let claudeHelp = "";
+  let claudeVersion = null;
+  let discoveryStatus = options.static ? "not-run" : null;
+  let discoveryError = null;
+  if (!options.static) {
+    const version = runCommand("claude", ["--version"], { cwd });
+    if (version.status === 0 && !version.error) {
+      claudeVersion = commandText(commandPayload(version));
+    }
+    const help = runCommand("claude", ["--help"], { cwd });
+    if (help.status === 0 && !help.error) {
+      claudeHelp = help.stdout || help.stderr;
+    } else {
+      discoveryStatus = "unavailable";
+      discoveryError = commandText(commandPayload(help));
+    }
+  }
   const catalog = getModelCatalog({
-    capability: options.capability || null
+    capability: options.capability || null,
+    claudeHelp,
+    claudeVersion,
+    discoveryStatus,
+    discoveryError
   });
   output(options.json ? catalog : renderModelCatalog(catalog), Boolean(options.json));
 }
 
 async function main() {
   const [command, ...argv] = process.argv.slice(2);
-  if (!command || command === "--help") {
-    process.stdout.write("Usage: claude-companion.mjs <setup|surface|help|raw|analyze|plan|exec|review|ultrareview|status|result|cancel|models> [args]\n");
+  if (!command || command === "--help" || command === "-h") {
+    handleRouterHelp(argv);
+    return;
+  }
+  if (command === "--version" || command === "-v" || command === "version") {
+    await handleVersion(argv);
     return;
   }
   if (command === "setup") {
@@ -350,7 +504,7 @@ async function main() {
   } else if (command === "surface") {
     await handleSurface(argv);
   } else if (command === "help") {
-    await handleClaudeHelp(argv);
+    await handleHelp(argv);
   } else if (command === "raw") {
     await handleRawClaude(argv);
   } else if (["analyze", "plan", "exec", "review"].includes(command)) {

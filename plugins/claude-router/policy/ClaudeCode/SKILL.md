@@ -49,13 +49,15 @@ Operate Anthropic's local `claude` CLI from Codex as a real second reasoning and
 - `haiku`: fast lower-cost route. Do not assume it supports every higher-end feature.
 - `opusplan`: uses `opus` in plan mode and `sonnet` in execution. Useful when the work splits cleanly into planning and execution. Do not assume 1M planning context here.
 - Use full model names or pinned `ANTHROPIC_DEFAULT_*_MODEL` environment variables when version stability matters more than convenience aliases.
-- Use `claude_router_models` to discover the current model catalog, including tier capabilities, effort levels, permission modes, and modifier flags. The catalog is static curated data, not a live probe. It returns:
-  - `tiers`: haiku, sonnet, opus — with context window, long-context support, ultrathink support, and cost tier
+- Use `claude_router_models` to discover live model selectors and the current model catalog, including tier capabilities, effort levels, permission modes, and modifier flags. It returns:
+  - `discovery`: live model discovery status, Claude CLI version, selectors, aliases, full names, and any discovery error
+  - `models`: selectors accepted by the installed Claude CLI plus curated fallback selectors
+  - `tiers`: known haiku, sonnet, opus metadata — with context window, long-context support, ultrathink support, and cost tier
   - `effort_levels`: low, medium, high, xhigh, max — with token budgets
   - `modifiers`: `--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare` — with tier compatibility
   - `permission_modes`: default (interactive), plan (read-only), bypassPermissions (requires `--allow-dangerous`)
   - `presets`: `--best` (resolves to opus)
-  - Pass `capability` (long_context, ultrathink, chrome) to filter tiers. Unknown values are rejected.
+  - Pass `capability` (long_context, ultrathink, chrome) to filter known tiers and selectors. Unknown values are rejected.
 
 ## Effort Policy
 

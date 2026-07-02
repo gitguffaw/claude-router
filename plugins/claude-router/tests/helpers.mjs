@@ -34,7 +34,7 @@ if (args.includes("--version")) {
   process.exit(0);
 }
 if (args.includes("--help")) {
-  console.log("Usage: claude [options] [command] [prompt]\\nCommands:\\n  mcp\\n  plugin\\n  agents");
+  console.log("Usage: claude [options] [command] [prompt]\\nOptions:\\n  --model <model>  Model for the current session. Provide an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g. 'claude-fable-5').\\nCommands:\\n  mcp\\n  plugin\\n  agents");
   process.exit(0);
 }
 if (args[0] === "auth" && args[1] === "status") {

@@ -2,6 +2,18 @@
 
 All notable changes to Claude Router are documented here.
 
+## Unreleased
+
+### Added
+
+- Live model selector discovery from installed `claude --help`, including new aliases such as `fable` and full names such as `claude-fable-5` when the local Claude CLI advertises them.
+- `claude_router_version` MCP tool and companion `version` / `-v` / `--version` command reporting both Claude Router and Claude CLI versions.
+- Router-aware `help` / `-h` / `--help` output with command summaries, model controls, and examples.
+
+### Changed
+
+- `claude_router_models` now returns `discovery` and `models` sections in addition to curated tiers, effort levels, modifiers, permission modes, and presets.
+
 ## [2.1.0] — 2026-07-01
 
 ### Added

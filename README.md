@@ -157,7 +157,8 @@ The plugin exposes these Codex tools:
 
 - `claude_router_setup`: check Node, Claude, auth, Claude plugins, and Claude MCP config
 - `claude_router_surface`: report the installed Claude CLI version and top-level help
-- `claude_router_help`: show help for an installed Claude subcommand
+- `claude_router_help`: show Claude Router help, or help for an installed Claude subcommand when args are provided
+- `claude_router_version`: show Claude Router and installed Claude CLI versions
 - `claude_router_analyze`: read-only analysis
 - `claude_router_plan`: read-only implementation or migration planning
 - `claude_router_exec`: write-capable implementation
@@ -165,7 +166,7 @@ The plugin exposes these Codex tools:
 - `claude_router_ultrareview`: run Claude's cloud-hosted `ultrareview`
 - `claude_router_status`: list or inspect jobs
 - `claude_router_result`: fetch a stored job result
-- `claude_router_models`: return the catalog of available Claude models, effort levels, permission modes, and modifier flags
+- `claude_router_models`: return live Claude model selectors plus curated effort levels, permission modes, and modifier flags
 - `claude_router_cancel`: cancel a background job
 - `claude_router_raw`: run raw Claude CLI args with guardrails
 
@@ -223,11 +224,13 @@ Use Claude Router models filtered to ultrathink support.
 
 ## Model Catalog Reference
 
-The `claude_router_models` tool and `models` companion mode return a static catalog describing Claude controls. The catalog is curated data, not a live probe of account or binary capabilities.
+The `claude_router_models` tool and `models` companion mode query the installed Claude CLI help for accepted `--model` selectors, then merge those live selectors with curated metadata for stable controls such as effort levels, permission modes, presets, and known tier capabilities. For example, if the installed Claude CLI advertises `fable` and `claude-fable-5`, the model selector list includes them without a router release.
 
 ### Catalog Sections
 
-- `tiers` — model tiers (haiku, sonnet, opus) with context windows, long-context support, ultrathink support, and cost tier
+- `discovery` — live model discovery status, Claude CLI version, selectors, aliases, full names, and any discovery error
+- `models` — selectors accepted by the installed Claude CLI plus curated fallback selectors
+- `tiers` — known tier metadata (haiku, sonnet, opus) with context windows, long-context support, ultrathink support, and cost tier
 - `effort_levels` — reasoning depth controls (low, medium, high, xhigh, max) with token budgets
 - `modifiers` — boolean session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) with tier compatibility
 - `permission_modes` — session permission controls (default, plan, bypassPermissions)
@@ -245,7 +248,7 @@ The `claude_router_models` tool and `models` companion mode return a static cata
 
 Pass `capability` to filter tiers. Valid values: `long_context`, `ultrathink`, `chrome`. Unknown values are rejected.
 
-For the full rendered catalog, run `node scripts/claude-companion.mjs models` from the plugin directory.
+For the full rendered catalog, run `node scripts/claude-companion.mjs models` from the plugin directory. Use `--static` to skip live CLI help discovery.
 
 ## Coding And Documentation Workflows
 
@@ -327,6 +330,8 @@ You can run the companion runtime directly from a clone when developing or debug
 ```bash
 cd plugins/claude-router
 node scripts/claude-companion.mjs setup
+node scripts/claude-companion.mjs --help
+node scripts/claude-companion.mjs version
 node scripts/claude-companion.mjs analyze --cwd /path/to/project "map the architecture"
 node scripts/claude-companion.mjs plan --cwd /path/to/project --background "plan the migration"
 node scripts/claude-companion.mjs status --cwd /path/to/project
@@ -352,6 +357,8 @@ Check local Claude support:
 
 ```bash
 cd plugins/claude-router
+node scripts/claude-companion.mjs help
+node scripts/claude-companion.mjs version
 node scripts/claude-companion.mjs surface
 node scripts/claude-companion.mjs help mcp add
 node scripts/claude-companion.mjs help plugin install

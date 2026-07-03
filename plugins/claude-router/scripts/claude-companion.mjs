@@ -125,6 +125,7 @@ const COMMON_VALUES = [
   "base",
   "scope",
   "timeout",
+  "timeout-ms",
   "agent",
   "agents",
   "allowed-tools",
@@ -237,7 +238,8 @@ function routerHelpPayload() {
       "--model <selector> passes any selector accepted by the installed Claude CLI, including aliases discovered from Claude help such as fable, opus, or sonnet.",
       "--best resolves to --opus.",
       "--sonnet, --opus, and --haiku are compatibility shortcuts.",
-      "--effort <low|medium|high|xhigh|max> controls reasoning depth."
+      "--effort <low|medium|high|xhigh|max> controls reasoning depth.",
+      "--timeout-ms <milliseconds> bounds managed routed print jobs; use 0 to disable the managed timeout for that job."
     ],
     examples: [
       "claude-companion.mjs version",
@@ -418,7 +420,9 @@ async function handleRawClaude(argv) {
   output(options.json ? payload : renderCommandPayload(`claude ${args.join(" ")}`, payload), Boolean(options.json));
 }
 
-async function runStoredJob(workspaceRoot, jobId, env = process.env) {
+async function runStoredJob(workspaceRoot, jobId, options = {}) {
+  const env = options.env ?? process.env;
+  const backgroundWorker = Boolean(options.backgroundWorker);
   const stored = readJobFile(workspaceRoot, jobId);
   if (!stored) {
     throw new Error(`Missing stored job ${jobId}`);
@@ -428,11 +432,12 @@ async function runStoredJob(workspaceRoot, jobId, env = process.env) {
     appendLogLine(logFile, `Invoking Claude ${stored.mode}.`);
     return runClaudePrintJob(workspaceRoot, stored.request, {
       env,
+      detached: backgroundWorker ? false : undefined,
       gitBefore: stored.request.gitBefore,
       readGitStatus: () => readGitStatus(workspaceRoot),
       onProgress: (event) => appendLogLine(logFile, event.logBody ?? event.message)
     });
-  });
+  }, { processGroup: backgroundWorker });
   return result;
 }
 
@@ -466,8 +471,11 @@ async function handleRouted(mode, argv) {
   writeJobFile(workspaceRoot, jobId, job);
 
   if (options.background) {
-    const processRecord = spawnDetached(process.execPath, [SCRIPT, "run-job", "--cwd", workspaceRoot, jobId], { cwd: workspaceRoot, env: process.env });
-    const backgroundJob = { ...job, status: "running", phase: "background", pid: processRecord.pid, processStartTime: processRecord.processStartTime };
+    const processRecord = spawnDetached(process.execPath, [SCRIPT, "run-job", "--cwd", workspaceRoot, jobId], {
+      cwd: workspaceRoot,
+      env: { ...process.env, CLAUDE_ROUTER_BACKGROUND: "1" }
+    });
+    const backgroundJob = { ...job, status: "running", phase: "background", pid: processRecord.pid, processStartTime: processRecord.processStartTime, processGroup: processRecord.processGroup };
     upsertJob(workspaceRoot, backgroundJob);
     writeJobFile(workspaceRoot, jobId, backgroundJob);
     output(options.json ? backgroundJob : renderStartedJob(backgroundJob), Boolean(options.json));
@@ -481,7 +489,7 @@ async function handleRouted(mode, argv) {
 async function handleRunJob(argv) {
   const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: [] });
   const cwd = resolveCwd(options);
-  await runStoredJob(cwd, positionals[0]);
+  await runStoredJob(cwd, positionals[0], { backgroundWorker: process.env.CLAUDE_ROUTER_BACKGROUND === "1" });
 }
 
 async function handleUltrareview(argv) {

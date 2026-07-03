@@ -25,12 +25,14 @@ const tools = [
   { name: "claude_router_status", description: "Show Claude Router jobs.", command: "status" },
   { name: "claude_router_result", description: "Show Claude Router job result.", command: "result" },
   { name: "claude_router_cancel", description: "Cancel a Claude Router job.", command: "cancel" },
-  { name: "claude_router_models", description: "Return live Claude model selectors plus curated effort levels and modifier flags.", command: "models" }
+  { name: "claude_router_models", description: "Return live Claude model selectors plus curated effort levels, permission modes, and modifier flags.", command: "models" }
 ];
 
 const ROUTED_COMMANDS = new Set(["analyze", "plan", "exec", "review", "adversarial-review"]);
 const VALUE_FLAGS = [
   ["--base", "base"],
+  ["--timeout", "timeout"],
+  ["--timeout-ms", "timeout_ms", "timeout-ms"],
   ["--model", "model"],
   ["--effort", "effort"],
   ["--permission-mode", "permission_mode", "permission-mode"],

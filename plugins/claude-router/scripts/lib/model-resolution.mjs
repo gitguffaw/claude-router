@@ -1,5 +1,16 @@
 const VALID_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
+function parseTimeoutMs(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid timeout "${value}". Use a non-negative millisecond value.`);
+  }
+  return parsed;
+}
+
 export function resolveClaudeControls(options = {}) {
   let model = options.model ? String(options.model).trim() : null;
   if (options.best) {
@@ -72,6 +83,7 @@ export function resolveClaudeControls(options = {}) {
     tmux: options.tmux || null,
     verbose: Boolean(options.verbose),
     worktree: options.worktree || null,
-    allowDangerouslySkipPermissions: Boolean(options["allow-dangerously-skip-permissions"])
+    allowDangerouslySkipPermissions: Boolean(options["allow-dangerously-skip-permissions"]),
+    timeoutMs: parseTimeoutMs(options["timeout-ms"] ?? options.timeout ?? null)
   };
 }

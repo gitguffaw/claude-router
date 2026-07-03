@@ -2,13 +2,23 @@
 
 All notable changes to Claude Router are documented here.
 
+## [2.2.3] — 2026-07-02
+
+### Fixed
+
+- Fixed background cancellation so the worker process group also owns the live Claude child process, preventing detached Claude children from surviving after `cancel`.
+- Added a default bounded timeout for managed routed Claude print jobs, plus `--timeout-ms` / `timeout_ms` override support.
+- Made `cancel` fail closed when hard-kill verification still sees the process alive instead of falsely marking the job `cancelled`.
+- Updated the model catalog and docs for current Claude permission modes: `default`, `acceptEdits`, `auto`, `plan`, `dontAsk`, and `bypassPermissions`.
+- Clarified that `--long-context` and `--ultrathink` are Claude Router convenience controls, not native Claude CLI flags.
+
 ## [2.2.2] — 2026-07-02
 
 ### Fixed
 
 - Added PID identity records with process start time for background jobs so cancellation does not signal a reused PID.
 - Added stale active-job detection during `status` and `result`, marking unverifiable/stale process records failed instead of leaving them running forever.
-- Added SIGTERM-to-SIGKILL process-group escalation with bounded polling for background job cancellation and foreground timeouts.
+- Added SIGTERM-to-SIGKILL process-group escalation primitives with bounded polling for background job cancellation and process cleanup.
 
 ## [2.2.1] — 2026-07-02
 

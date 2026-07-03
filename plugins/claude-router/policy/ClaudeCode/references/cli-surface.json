@@ -1,8 +1,8 @@
 {
   "tool": "claude",
   "product": "Claude Code",
-  "verified_on": "2026-04-19",
-  "local_version": "2.1.114",
+  "verified_on": "2026-07-02",
+  "local_version": "2.1.198",
   "provenance": {
     "local_commands": [
       "claude --version",
@@ -19,7 +19,14 @@
       "mcp": "https://code.claude.com/docs/en/mcp",
       "sub_agents": "https://code.claude.com/docs/en/sub-agents",
       "plugins_reference": "https://code.claude.com/docs/en/plugins-reference",
+      "skills": "https://code.claude.com/docs/en/skills",
+      "hooks": "https://code.claude.com/docs/en/hooks",
+      "commands": "https://code.claude.com/docs/en/commands",
+      "cli_reference": "https://code.claude.com/docs/en/cli-reference",
       "chrome": "https://code.claude.com/docs/en/chrome",
+      "ultrareview": "https://code.claude.com/docs/en/ultrareview",
+      "remote_control": "https://code.claude.com/docs/en/remote-control",
+      "gateway": "https://code.claude.com/docs/en/claude-apps-gateway",
       "ultraplan": "https://code.claude.com/docs/en/ultraplan",
       "context_windows": "https://platform.claude.com/docs/en/build-with-claude/context-windows"
     },
@@ -48,6 +55,7 @@
     "subscription_type": "max",
     "enabled_plugins": [
       "clangd-lsp@claude-plugins-official",
+      "codex-router@codex-router",
       "compound-engineering@compound-engineering-plugin",
       "superpowers@claude-plugins-official"
     ],
@@ -56,11 +64,12 @@
       "linear@claude-plugins-official"
     ],
     "connected_mcp_servers": [
+      "claude.ai Notion",
       "claude.ai Linear",
+      "claude.ai Google Drive",
       "plugin:compound-engineering:context7"
     ],
     "mcp_servers_needing_auth": [
-      "claude.ai Google Drive",
       "claude.ai Gmail",
       "claude.ai Google Calendar"
     ],
@@ -76,7 +85,10 @@
       "compound-engineering:research:git-history-analyzer",
       "compound-engineering:research:learnings-researcher",
       "compound-engineering:research:repo-research-analyst"
-    ]
+    ],
+    "claude_router_plugin_present": false,
+    "claude_router_mcp_present": false,
+    "notes": "This environment snapshot is informational only. Re-check live availability with claude --help, claude plugin list, claude mcp list, and claude agents."
   },
   "codex_skill_design": {
     "progressive_disclosure": true,

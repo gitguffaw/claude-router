@@ -71,7 +71,7 @@ export function handleResult(cwd, { reference = "", json = false } = {}) {
   output(json ? job : renderStoredJobResult(job), json);
 }
 
-export async function handleCancel(cwd, { reference = "", json = false } = {}) {
+export async function handleCancel(cwd, { reference = "", json = false, terminateProcessTreeImpl = terminateProcessTree } = {}) {
   if (!reference) {
     throw new Error("cancel requires a job id.");
   }
@@ -79,8 +79,8 @@ export async function handleCancel(cwd, { reference = "", json = false } = {}) {
   if (!isActiveJobStatus(job.status)) {
     throw new Error(`Cannot cancel job ${job.id} because it is ${job.status}.`);
   }
-  const signal = await terminateProcessTree(
-    { pid: job.pid ?? Number.NaN, processStartTime: job.processStartTime ?? null },
+  const signal = await terminateProcessTreeImpl(
+    { pid: job.pid ?? Number.NaN, processStartTime: job.processStartTime ?? null, processGroup: job.processGroup },
     { allowUnverified: process.platform === "win32" }
   );
   if (!signal.attempted) {
@@ -88,6 +88,12 @@ export async function handleCancel(cwd, { reference = "", json = false } = {}) {
     upsertJob(cwd, stale);
     writeJobFile(cwd, job.id, stale);
     throw new Error(`Cannot cancel job ${job.id}: recorded process ${signal.verification?.reason ?? "could not be verified"}.`);
+  }
+  if (signal.verification?.matches) {
+    const stillRunning = { ...job, phase: "cancel-failed", cancelSignal: signal };
+    upsertJob(cwd, stillRunning);
+    writeJobFile(cwd, job.id, stillRunning);
+    throw new Error(`Cannot confirm cancellation for job ${job.id}: process still appears to be running.`);
   }
   const cancelled = { ...job, status: "cancelled", phase: "cancelled", pid: null, completedAt: new Date().toISOString(), cancelSignal: signal };
   upsertJob(cwd, cancelled);

@@ -57,7 +57,9 @@ Do not replace a failed Claude run with a Codex-generated substitute answer.
 - `--best` maps to `opus`.
 - `--sonnet`, `--opus`, and `--haiku` are convenience selectors.
 - `--effort <low|medium|high|xhigh|max>` passes through to Claude.
+- `--long-context` and `--ultrathink` are router-level conveniences: long-context rewrites the model selector, and ultrathink adds a reasoning request to the prompt.
 - `--chrome`, `--plugin-dir`, `--plugin-url`, `--mcp-config`, `--settings`, `--add-dir`, agents, tools, allowlists, schemas, resume/session, and print-mode streaming controls are available when the user explicitly needs those Claude surfaces.
+- `--timeout-ms <milliseconds>` bounds managed routed Claude print jobs; `0` disables the managed timeout.
 - `--background` returns a job id; use `status`, `result`, or `cancel` for follow-up.
 - For Claude features that are not represented by a curated tool, call `surface` or `help` first, then use `raw` with exact Claude CLI args.
 
@@ -67,6 +69,6 @@ Do not replace a failed Claude run with a Codex-generated substitute answer.
 - Do not use `--bare` by default.
 - Do not use dangerous permission bypass unless the user explicitly asks for that risk.
 - Do not use `raw` for mutating Claude configuration unless the user explicitly requested that action; pass the raw tool's mutation override only in that case.
-- Do not edit files from `analyze`, `plan`, or `review`.
+- Do not edit files from `analyze`, `plan`, `review`, or `adversarial-review`.
 - Do not auto-fix review findings.
 - Preserve Claude failure boundaries.

@@ -57,7 +57,11 @@ export function getProcessStartTime(pid, options = {}) {
 }
 
 export function buildProcessRecord(pid, options = {}) {
-  return Number.isFinite(pid) ? { pid, processStartTime: getProcessStartTime(pid, options) } : { pid: null, processStartTime: null };
+  const base = Number.isFinite(pid) ? { pid, processStartTime: getProcessStartTime(pid, options) } : { pid: null, processStartTime: null };
+  if (typeof options.processGroup === "boolean") {
+    base.processGroup = options.processGroup;
+  }
+  return base;
 }
 
 export function currentProcessRecord(options = {}) {
@@ -86,6 +90,19 @@ export function verifyProcessRecord(record, options = {}) {
   return { alive: true, matches: true, reason: "matched", currentStartTime };
 }
 
+function shouldSignalProcessGroup(record, options = {}) {
+  if (process.platform === "win32") {
+    return false;
+  }
+  if (typeof options.processGroup === "boolean") {
+    return options.processGroup;
+  }
+  if (typeof record === "object" && typeof record?.processGroup === "boolean") {
+    return record.processGroup;
+  }
+  return true;
+}
+
 function processGroupSignalTarget(pid) {
   return process.platform !== "win32" ? -pid : pid;
 }
@@ -107,16 +124,17 @@ export function runProcess(command, args = [], options = {}) {
   return new Promise((resolve) => {
     let settled = false;
     let timedOut = false;
+    const detached = options.detached ?? process.platform !== "win32";
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env ?? process.env,
       input: options.input,
       stdio: ["pipe", "pipe", "pipe"],
-      detached: options.detached ?? process.platform !== "win32",
+      detached,
       shell: process.platform === "win32" ? (process.env.SHELL || true) : false,
       windowsHide: true
     });
-    const processRecord = buildProcessRecord(child.pid ?? Number.NaN);
+    const processRecord = buildProcessRecord(child.pid ?? Number.NaN, { processGroup: Boolean(detached && process.platform !== "win32") });
     const finish = (payload) => {
       if (settled) {
         return;
@@ -150,10 +168,10 @@ export function runProcess(command, args = [], options = {}) {
       options.onStderr?.(chunk);
     });
     child.on("error", (error) => {
-      finish({ command, args, status: 1, signal: null, stdout, stderr, error, pid: child.pid ?? null, processStartTime: processRecord.processStartTime });
+      finish({ command, args, status: 1, signal: null, stdout, stderr, error, pid: child.pid ?? null, processStartTime: processRecord.processStartTime, processGroup: processRecord.processGroup });
     });
     child.on("exit", (status, signal) => {
-      finish({ command, args, status: status ?? 0, signal: signal ?? null, stdout, stderr, error: null, pid: child.pid ?? null, processStartTime: processRecord.processStartTime });
+      finish({ command, args, status: status ?? (signal ? 1 : 0), signal: signal ?? null, stdout, stderr, error: null, pid: child.pid ?? null, processStartTime: processRecord.processStartTime, processGroup: processRecord.processGroup });
     });
     if (options.input) {
       child.stdin.end(options.input);
@@ -173,7 +191,7 @@ export function spawnDetached(command, args = [], options = {}) {
     windowsHide: true
   });
   child.unref();
-  return buildProcessRecord(child.pid ?? Number.NaN);
+  return buildProcessRecord(child.pid ?? Number.NaN, { processGroup: process.platform !== "win32" });
 }
 
 export async function terminateProcessTree(record, options = {}) {
@@ -190,11 +208,12 @@ export async function terminateProcessTree(record, options = {}) {
   const hardTimeoutMs = Math.max(stopGraceMs, Number(options.hardTimeoutMs) || DEFAULT_STOP_HARD_TIMEOUT_MS);
   const pollIntervalMs = Math.max(25, Number(options.pollIntervalMs) || DEFAULT_STOP_POLL_MS);
   if (process.platform !== "win32") {
-    let method = "process-group";
+    const signalProcessGroup = shouldSignalProcessGroup(record, options);
+    let method = signalProcessGroup ? "process-group" : "process";
     try {
-      killImpl(processGroupSignalTarget(pid), "SIGTERM");
+      killImpl(signalProcessGroup ? processGroupSignalTarget(pid) : pid, "SIGTERM");
     } catch (error) {
-      if (error?.code !== "ESRCH") {
+      if (signalProcessGroup && error?.code !== "ESRCH") {
         try {
           killImpl(pid, "SIGTERM");
           method = "process";
@@ -204,8 +223,10 @@ export async function terminateProcessTree(record, options = {}) {
           }
           return { attempted: true, delivered: false, escalated: false, method, verification: verifyProcessRecord(record, options) };
         }
-      } else {
+      } else if (error?.code === "ESRCH") {
         return { attempted: true, delivered: false, escalated: false, method, verification: verifyProcessRecord(record, options) };
+      } else {
+        throw error;
       }
     }
     const afterTerm = await waitUntilGone(record, Date.now() + stopGraceMs, pollIntervalMs, options);

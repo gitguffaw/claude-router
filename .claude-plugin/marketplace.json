@@ -1,20 +1,20 @@
 {
   "name": "claude-router",
   "description": "Policy-backed Claude CLI delegation for Codex, Claude Code, and AGY.",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "owner": {
     "name": "Compound"
   },
   "metadata": {
     "description": "Claude Router plugin for live model discovery, policy-backed Claude delegation, and guarded CLI passthrough.",
-    "version": "2.2.2"
+    "version": "2.2.3"
   },
   "plugins": [
     {
       "name": "claude-router",
       "displayName": "Claude Router",
       "description": "Route host-agent work through the local Claude CLI with live model discovery, reliable jobs, and explicit policy controls.",
-      "version": "2.2.2",
+      "version": "2.2.3",
       "author": {
         "name": "Compound"
       },

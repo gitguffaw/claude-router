@@ -4,11 +4,47 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { buildEnv, initGitRepo, installFakeClaude, makeTempDir, run } from "./helpers.mjs";
-import { upsertJob, writeJobFile } from "../scripts/lib/state.mjs";
+import { readJobFile, upsertJob, writeJobFile } from "../scripts/lib/state.mjs";
+import { handleCancel } from "../scripts/lib/job-commands.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = path.join(ROOT, "scripts", "claude-companion.mjs");
 const PLUGIN = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function waitForFile(file, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(file)) {
+      return true;
+    }
+    sleep(25);
+  }
+  return fs.existsSync(file);
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function waitForProcessExit(pid, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processAlive(pid)) {
+      return true;
+    }
+    sleep(25);
+  }
+  return !processAlive(pid);
+}
 
 function installFakeClaudeWithoutRouter(binDir) {
   fs.mkdirSync(binDir, { recursive: true });
@@ -251,6 +287,21 @@ test("read-only route warns when fake claude changes files", () => {
   assert.match(payload.warnings.join("\n"), /Read-only/);
 });
 
+test("managed routed jobs fail when the Claude process times out", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const result = run("node", [SCRIPT, "analyze", "--json", "--timeout-ms", "250", "SLEEP"], { cwd: repo, env: buildEnv(bin, data), timeout: 5000 });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.result.timedOut, true);
+  assert.match(payload.warnings.join("\n"), /timed out/);
+});
+
+
 test("status and result return stored jobs", () => {
   const repo = makeTempDir();
   const bin = makeTempDir();
@@ -321,6 +372,73 @@ test("cancel refuses active jobs whose recorded PID identity is stale", () => {
   assert.equal(payload.pid, null);
   assert.equal(payload.cancelSignal.attempted, false);
 });
+
+test("cancel does not mark jobs cancelled when termination cannot confirm exit", async () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const env = buildEnv(bin, data);
+  const activeJob = {
+    id: "unkillable-job",
+    jobClass: "claude",
+    kindLabel: "Analyze",
+    mode: "analyze",
+    title: "unkillable",
+    summary: "unkillable",
+    workspaceRoot: repo,
+    status: "running",
+    phase: "running",
+    pid: 123,
+    processStartTime: "Mon Jan  1 00:00:00 2026",
+    processGroup: true,
+    logFile: null
+  };
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = data;
+  try {
+    upsertJob(repo, activeJob);
+    writeJobFile(repo, activeJob.id, activeJob);
+    await assert.rejects(
+      () => handleCancel(repo, {
+        reference: activeJob.id,
+        json: true,
+        terminateProcessTreeImpl: async () => ({
+          attempted: true,
+          delivered: true,
+          escalated: true,
+          method: "process-group",
+          verification: { alive: true, matches: true, reason: "matched", currentStartTime: activeJob.processStartTime }
+        })
+      }),
+      /Cannot confirm cancellation/
+    );
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+  }
+
+  const readDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = data;
+  let payload;
+  try {
+    payload = readJobFile(repo, activeJob.id);
+  } finally {
+    if (readDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = readDataDir;
+    }
+  }
+  assert.equal(payload.status, "running");
+  assert.equal(payload.phase, "cancel-failed");
+  assert.equal(payload.cancelSignal.verification.matches, true);
+});
+
 
 test("status marks stale active jobs failed instead of leaving them running", () => {
   const repo = makeTempDir();
@@ -439,12 +557,24 @@ test("background job can be cancelled", () => {
   const data = makeTempDir();
   installFakeClaude(bin);
   initGitRepo(repo);
-  const env = buildEnv(bin, data);
+  const pidFile = path.join(data, "fake-claude.pid");
+  const env = { ...buildEnv(bin, data), FAKE_CLAUDE_PID_FILE: pidFile };
   const started = run("node", [SCRIPT, "analyze", "--json", "--background", "SLEEP"], { cwd: repo, env });
   assert.equal(started.status, 0, started.stderr);
   const startPayload = JSON.parse(started.stdout);
+  assert.equal(waitForFile(pidFile), true, "fake Claude child PID was not recorded");
+  const childPid = Number(fs.readFileSync(pidFile, "utf8"));
+  assert.equal(processAlive(childPid), true, "fake Claude child should be alive before cancel");
   const cancelled = run("node", [SCRIPT, "cancel", "--json", startPayload.id], { cwd: repo, env });
   assert.equal(cancelled.status, 0, cancelled.stderr);
   const cancelPayload = JSON.parse(cancelled.stdout);
   assert.equal(cancelPayload.status, "cancelled");
+  if (!waitForProcessExit(childPid)) {
+    try {
+      process.kill(childPid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+    assert.fail(`fake Claude child ${childPid} survived background cancel`);
+  }
 });

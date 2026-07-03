@@ -1,4 +1,4 @@
-export const CATALOG_VERSION = "1.1.0";
+export const CATALOG_VERSION = "1.1.1";
 
 export const MODEL_TIERS = [
   {
@@ -49,19 +49,19 @@ export const MODIFIERS = [
     id: "long_context",
     flag: "--long-context",
     type: "boolean",
-    description: "Extend context window to 1M tokens. Appends [1m] to the model identifier.",
+    description: "Router modifier that extends context by appending [1m] to the model identifier.",
     compatible_tiers: ["sonnet", "opus"],
     conflicts_with: [],
-    notes: "Haiku does not support long context. Defaults to opus[1m] when no tier is specified."
+    notes: "Router-level convenience control, not a native Claude CLI flag. Haiku does not support long context. Defaults to opus[1m] when no tier is specified."
   },
   {
     id: "ultrathink",
     flag: "--ultrathink",
     type: "boolean",
-    description: "Enable extended thinking pass for deep, multi-step reasoning.",
+    description: "Router modifier that adds an ultrathink reasoning request to the prompt.",
     compatible_tiers: ["opus"],
     conflicts_with: [],
-    notes: "Only supported on Opus."
+    notes: "Router-level prompt control, not a native Claude CLI flag. Only supported on Opus."
   },
   {
     id: "chrome",
@@ -101,11 +101,32 @@ export const PERMISSION_MODES = [
     notes: "Standard mode. The user approves each action through the Claude CLI permission prompt."
   },
   {
+    id: "acceptEdits",
+    flag_value: "acceptEdits",
+    description: "Automatically accept file edits while keeping other permission behavior constrained by Claude.",
+    requires_allow_dangerous: false,
+    notes: "Native Claude Code permission mode."
+  },
+  {
+    id: "auto",
+    flag_value: "auto",
+    description: "Claude's automatic permission mode.",
+    requires_allow_dangerous: false,
+    notes: "Native Claude Code permission mode."
+  },
+  {
     id: "plan",
     flag_value: "plan",
     description: "Plan-only mode. Claude can read and reason but cannot write files or execute commands.",
     requires_allow_dangerous: false,
     notes: "Use for architecture review, exploration, and planning before committing to edits."
+  },
+  {
+    id: "dontAsk",
+    flag_value: "dontAsk",
+    description: "Claude permission mode that avoids interactive asks according to Claude's own policy semantics.",
+    requires_allow_dangerous: false,
+    notes: "Native Claude Code permission mode; distinct from bypassPermissions."
   },
   {
     id: "bypassPermissions",

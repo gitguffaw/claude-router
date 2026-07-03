@@ -13,7 +13,8 @@ export function run(command, args = [], options = {}) {
     env: options.env ?? process.env,
     encoding: "utf8",
     input: options.input,
-    maxBuffer: 20 * 1024 * 1024
+    maxBuffer: 20 * 1024 * 1024,
+    timeout: options.timeout
   });
 }
 
@@ -56,6 +57,9 @@ if (args[0] === "ultrareview") {
 if (args.includes("-p")) {
   const prompt = args[args.length - 1] || "";
   if (prompt.includes("SLEEP")) {
+    if (process.env.FAKE_CLAUDE_PID_FILE) {
+      fs.writeFileSync(process.env.FAKE_CLAUDE_PID_FILE, String(process.pid));
+    }
     setTimeout(() => {
       console.log(JSON.stringify({ result: "Slept", session_id: "00000000-0000-4000-8000-000000000000" }));
     }, 5000);

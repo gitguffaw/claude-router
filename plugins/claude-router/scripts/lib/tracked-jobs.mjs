@@ -39,9 +39,17 @@ export function appendLogLine(logFile, message) {
   fs.appendFileSync(logFile, `[${nowIso()}] ${text}\n`, "utf8");
 }
 
-export async function runTrackedJob(job, runner) {
-  const processRecord = currentProcessRecord();
-  const running = { ...job, status: "running", phase: "running", startedAt: nowIso(), pid: processRecord.pid, processStartTime: processRecord.processStartTime };
+export async function runTrackedJob(job, runner, options = {}) {
+  const processRecord = currentProcessRecord({ processGroup: Boolean(options.processGroup) });
+  const running = {
+    ...job,
+    status: "running",
+    phase: "running",
+    startedAt: nowIso(),
+    pid: processRecord.pid,
+    processStartTime: processRecord.processStartTime,
+    processGroup: processRecord.processGroup
+  };
   upsertJob(job.workspaceRoot, running);
   writeJobFile(job.workspaceRoot, job.id, running);
   try {

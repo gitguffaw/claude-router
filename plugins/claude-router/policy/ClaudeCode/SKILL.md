@@ -20,10 +20,10 @@ Operate Anthropic's local `claude` CLI from Codex as a real second reasoning and
 
 ## Baseline
 
-- Verified local binary: `claude 2.1.114 (Claude Code)`
-- Verified on: `2026-04-19`
+- Verified local binary during Claude Router v2.2.3 audit: `claude 2.1.198 (Claude Code)`
+- Verified on: `2026-07-02`
 - Verified local environment: first-party Anthropic auth, `max` plan
-- Official Anthropic docs: `model-config`, `permission-modes`, `mcp`, `sub-agents`, `plugins-reference`, `chrome`, `ultraplan`, and platform `context-windows`
+- Official Anthropic docs: CLI reference, commands, model config, permission modes, MCP, sub-agents, plugins, skills, hooks, Chrome, ultrareview, remote control, gateway, and platform context windows
 - Context7 may help discover Claude docs quickly, but official Anthropic docs win for volatile facts
 - Local truth source: `claude --help`, `claude -p --help`, `claude auth status`, `claude agents`, `claude mcp list`, and `claude plugin list`
 - Codex design sources: OpenAI Codex Skills, Non-interactive Mode, Speed, and Codex Prompting Guide
@@ -54,8 +54,8 @@ Operate Anthropic's local `claude` CLI from Codex as a real second reasoning and
   - `models`: selectors accepted by the installed Claude CLI plus curated fallback selectors
   - `tiers`: known haiku, sonnet, opus metadata — with context window, long-context support, ultrathink support, and cost tier
   - `effort_levels`: low, medium, high, xhigh, max — with token budgets
-  - `modifiers`: `--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare` — with tier compatibility
-  - `permission_modes`: default (interactive), plan (read-only), bypassPermissions (requires `--allow-dangerous`)
+  - `modifiers`: router controls and Claude session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) — with tier compatibility. `--long-context` and `--ultrathink` are router-level conveniences, not native Claude CLI flags.
+  - `permission_modes`: default, acceptEdits, auto, plan, dontAsk, bypassPermissions (requires `--allow-dangerous`)
   - `presets`: `--best` (resolves to opus)
   - Pass `capability` (long_context, ultrathink, chrome) to filter known tiers and selectors. Unknown values are rejected.
 

@@ -1,6 +1,6 @@
 # Claude Router
 
-Current release: `v2.2.2`
+Current release: `v2.2.3`
 
 Claude Router lets a host agent delegate work to the local Claude Code CLI through policy-backed modes for setup, analysis, planning, implementation, review, model and capability discovery, background jobs, result retrieval, and guarded access to installed Claude CLI features.
 
@@ -215,7 +215,7 @@ Examples:
 Claude Router intentionally maps to Claude Code capabilities, not Codex Router internals one-for-one:
 
 - Claude Code plugin commands are real plugin components, so Claude Router ships `/claude-router:*` commands for Claude Code in addition to Codex MCP tools.
-- Claude Code plugins can ship skills, agents, hooks, MCP servers, LSP servers, monitors, default settings, and command files. Claude Router currently ships command files and MCP tools; hooks and rescue agents are not enabled by default because they would create Claude-reviewing-Claude loops without a clear host boundary.
+- Claude Code plugins can ship skills, agents, hooks, MCP servers, LSP servers, monitors, default settings, and command files. Claude Router currently ships command files, plugin skills, and MCP tools; hooks and rescue agents are not enabled by default because they would create Claude-reviewing-Claude loops without a clear host boundary.
 - Claude Code has `--model`, `--effort`, `--chrome`, `--agent`, `--agents`, plugin loading, MCP config, background sessions, remote control, gateway, ultrareview, and raw CLI subcommands. Claude Router exposes common delegation modes directly and keeps the rest behind guarded `raw` / `cli` passthrough.
 - Claude Code has a documented `WebSearch` tool and `/deep-research` workflow inside sessions, but there is no verified `claude search` or `claude web-search` shell subcommand. Claude Router therefore rejects Codex-style `--search` and asks users to use `--chrome`, MCP/docs tooling, or explicit verification instead.
 - Codex Router's stop-review gate and app-server broker are Codex-host mechanics. Claude Router uses process-backed Claude CLI jobs, so job status/result/cancel parity exists without copying that broker.
@@ -302,8 +302,8 @@ The `claude_router_models` tool and `models` companion mode query the installed 
 - `models` — selectors accepted by the installed Claude CLI plus curated fallback selectors
 - `tiers` — known tier metadata (haiku, sonnet, opus) with context windows, long-context support, ultrathink support, and cost tier
 - `effort_levels` — reasoning depth controls (low, medium, high, xhigh, max) with token budgets
-- `modifiers` — boolean session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) with tier compatibility
-- `permission_modes` — session permission controls (default, plan, bypassPermissions)
+- `modifiers` — router controls and Claude session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) with tier compatibility. `--long-context` and `--ultrathink` are router-level conveniences; `--chrome`, `--no-chrome`, and `--bare` pass through to Claude.
+- `permission_modes` — Claude session permission controls (default, acceptEdits, auto, plan, dontAsk, bypassPermissions)
 - `presets` — shortcut flags (`--best` resolves to opus)
 
 ### Permission Modes
@@ -311,7 +311,10 @@ The `claude_router_models` tool and `models` companion mode query the installed 
 | Mode | Flag Value | Description | Requires `--allow-dangerous` |
 | --- | --- | --- | --- |
 | default | `default` | Interactive approval for writes and commands | No |
+| acceptEdits | `acceptEdits` | Accept file edits automatically under Claude's permission semantics | No |
+| auto | `auto` | Claude's automatic permission mode | No |
 | plan | `plan` | Read-only; no file writes or command execution | No |
+| dontAsk | `dontAsk` | Avoid interactive asks according to Claude's permission semantics | No |
 | bypassPermissions | `bypassPermissions` | Skip all permission checks | Yes |
 
 ### Capability Filtering
@@ -474,6 +477,8 @@ node scripts/claude-companion.mjs raw --allow-dangerous -- -p --permission-mode 
 | `cli` | Depends | Alias for guarded raw Claude CLI passthrough |
 
 Read-only routed modes snapshot git status before and after Claude runs. If Claude changes files during `analyze`, `plan`, `review`, or `adversarial-review`, the job is marked `completed-with-warnings`.
+
+Managed routed jobs have a default 30 minute process timeout. Pass `--timeout-ms <milliseconds>` to override it, or `--timeout-ms 0` to disable the managed timeout for a specific routed job.
 
 ## Uninstall
 

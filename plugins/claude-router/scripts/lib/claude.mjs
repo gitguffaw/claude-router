@@ -1,12 +1,25 @@
 import path from "node:path";
 import { binaryAvailable, runCommand, runProcess } from "./process.mjs";
 
+const DEFAULT_MANAGED_TIMEOUT_MS = 30 * 60 * 1000;
+
 function parseJsonOrNull(value) {
   try {
     return JSON.parse(value);
   } catch {
     return null;
   }
+}
+
+function managedTimeoutMs(value) {
+  if (value === null || value === undefined || value === "") {
+    return DEFAULT_MANAGED_TIMEOUT_MS;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid timeout "${value}". Use a non-negative millisecond value.`);
+  }
+  return parsed;
 }
 
 export function getClaudeAvailability(cwd, env = process.env) {
@@ -129,9 +142,12 @@ export function buildClaudePrintArgs(request) {
 
 export async function runClaudePrintJob(cwd, request, options = {}) {
   const args = buildClaudePrintArgs(request);
+  const timeoutMs = managedTimeoutMs(options.timeoutMs ?? request.controls?.timeoutMs);
   const result = await runProcess("claude", args, {
     cwd,
     env: options.env ?? process.env,
+    timeoutMs,
+    detached: options.detached,
     onStdout: (chunk) => options.onProgress?.({ message: "Claude stdout", logBody: chunk }),
     onStderr: (chunk) => options.onProgress?.({ message: chunk.trim(), logBody: chunk })
   });
@@ -139,17 +155,22 @@ export async function runClaudePrintJob(cwd, request, options = {}) {
   const parsed = parseJsonOrNull(rawOutput);
   const gitAfter = options.readGitStatus?.();
   const warnings = [];
+  if (result.timedOut) {
+    warnings.push("Claude process timed out and was terminated.");
+  }
   if (!request.write && options.gitBefore?.available && gitAfter?.available && options.gitBefore.short !== gitAfter.short) {
     warnings.push("Read-only Claude route changed git status.");
   }
   return {
     exitStatus: result.status,
-    jobStatus: result.status === 0 ? (warnings.length ? "completed-with-warnings" : "completed") : "failed",
+    jobStatus: !result.timedOut && result.status === 0 ? (warnings.length ? "completed-with-warnings" : "completed") : "failed",
     payload: {
       mode: request.mode,
       workflow: request.workflow,
       command: "claude",
       args,
+      timedOut: Boolean(result.timedOut),
+      signal: result.signal,
       rawOutput,
       parsedOutput: parsed,
       stderr: result.stderr.trim(),

@@ -81,8 +81,8 @@ The `models` mode queries the installed Claude CLI help for accepted `--model` s
 - **models**: Selectors accepted by the installed Claude CLI plus curated fallback selectors
 - **tiers**: Model tiers (haiku, sonnet, opus) with context window, long-context and ultrathink support, and cost tier
 - **effort_levels**: Reasoning depth controls (low, medium, high, xhigh, max) with token budgets
-- **modifiers**: Boolean session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) with tier compatibility
-- **permission_modes**: Session permission controls with activation rules
+- **modifiers**: Router controls and Claude session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) with tier compatibility. `--long-context` and `--ultrathink` are router-level conveniences; `--chrome`, `--no-chrome`, and `--bare` pass through to Claude.
+- **permission_modes**: Claude session permission controls with activation rules
 - **presets**: Shortcut flags (`--best` resolves to opus)
 
 ### Permission Modes
@@ -90,7 +90,10 @@ The `models` mode queries the installed Claude CLI help for accepted `--model` s
 | Mode | Flag Value | Requires `--allow-dangerous` |
 | --- | --- | --- |
 | default | `default` | No |
+| acceptEdits | `acceptEdits` | No |
+| auto | `auto` | No |
 | plan | `plan` | No |
+| dontAsk | `dontAsk` | No |
 | bypassPermissions | `bypassPermissions` | Yes |
 
 ### Capability Filter

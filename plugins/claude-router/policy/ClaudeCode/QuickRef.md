@@ -1,17 +1,15 @@
 # Claude Code CLI Quick Reference
 
 Working reference for the local Anthropic `claude` CLI.
-Verified against `claude 2.1.114 (Claude Code)` on `2026-04-19`.
-Official docs re-checked on `2026-04-19`: `model-config`, `permission-modes`, `mcp`, `sub-agents`, `plugins-reference`, `chrome`, `ultraplan`, and platform `context-windows`.
+Verified against `claude 2.1.198 (Claude Code)` on `2026-07-02`.
+Official docs re-checked on `2026-07-02`: CLI reference, commands, model config, permission modes, MCP, sub-agents, plugins, skills, hooks, Chrome, ultrareview, remote control, gateway, and platform context windows.
 
 ## Current Local Environment
 
 - Auth: logged in with first-party `claude.ai`
 - Subscription: `max`
-- Built-in agents available: `Explore`, `Plan`, `general-purpose`, `statusline-setup`
-- Enabled plugins: `clangd-lsp`, `compound-engineering`, `superpowers`
-- Connected MCP: `claude.ai Linear`, `plugin:compound-engineering:context7`
-- MCP needing auth: `claude.ai Google Drive`, `claude.ai Gmail`, `claude.ai Google Calendar`
+- Built-in/plugin agents and connected MCP servers are local-install dependent; confirm with `claude agents`, `claude plugin list`, and `claude mcp list` before promising availability.
+- On the 2026-07-02 audit machine, Claude Code itself did not list `claude-router` as an installed Claude plugin or Claude-side MCP server, even though Codex had `claude-router@claude-router` installed at `2.2.2`.
 
 ## Codex Interop Defaults
 

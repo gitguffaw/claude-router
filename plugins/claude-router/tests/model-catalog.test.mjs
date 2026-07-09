@@ -163,14 +163,25 @@ test("filtered catalog output also validates against models-output schema", () =
 // ── MCP tool tests ───────────────────────────────────────────────────────────
 
 function request(proc, message) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
     const onData = (chunk) => {
-      const line = String(chunk).trim().split(/\r?\n/).find(Boolean);
-      if (!line) {
-        return;
+      buffer += String(chunk);
+      let newline = buffer.indexOf("\n");
+      while (newline !== -1) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (line) {
+          proc.stdout.off("data", onData);
+          try {
+            resolve(JSON.parse(line));
+          } catch (error) {
+            reject(error);
+          }
+          return;
+        }
+        newline = buffer.indexOf("\n");
       }
-      proc.stdout.off("data", onData);
-      resolve(JSON.parse(line));
     };
     proc.stdout.on("data", onData);
     proc.stdin.write(`${JSON.stringify(message)}\n`);

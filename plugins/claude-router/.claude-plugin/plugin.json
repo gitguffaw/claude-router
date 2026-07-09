@@ -1,7 +1,7 @@
 {
   "name": "claude-router",
   "displayName": "Claude Router",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "description": "Route host-agent work through the local Claude CLI with live model discovery, reliable jobs, and explicit policy controls.",
   "author": {
     "name": "Compound"

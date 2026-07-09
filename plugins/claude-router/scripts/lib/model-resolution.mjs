@@ -84,6 +84,6 @@ export function resolveClaudeControls(options = {}) {
     verbose: Boolean(options.verbose),
     worktree: options.worktree || null,
     allowDangerouslySkipPermissions: Boolean(options["allow-dangerously-skip-permissions"]),
-    timeoutMs: parseTimeoutMs(options["timeout-ms"] ?? options.timeout ?? null)
+    timeoutMs: parseTimeoutMs(options["timeout-ms"] ?? null)
   };
 }

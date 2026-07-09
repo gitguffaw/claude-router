@@ -38,9 +38,20 @@ function refreshStaleActiveJobs(cwd) {
   }
 }
 
+function parseNonNegativeNumber(value, defaultValue, label) {
+  if (value === null || value === undefined || value === "") {
+    return defaultValue;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid ${label} "${value}". Use a non-negative millisecond value.`);
+  }
+  return parsed;
+}
+
 async function waitForJob(cwd, reference, options = {}) {
-  const timeoutMs = Math.max(0, Number(options.timeoutMs) || 240000);
-  const pollIntervalMs = Math.max(100, Number(options.pollIntervalMs) || 250);
+  const timeoutMs = parseNonNegativeNumber(options.timeoutMs, 240000, "timeout");
+  const pollIntervalMs = Math.max(100, parseNonNegativeNumber(options.pollIntervalMs, 250, "poll interval"));
   const deadline = Date.now() + timeoutMs;
   let job = readFullJob(cwd, reference);
   while (isActiveJobStatus(job.status) && Date.now() < deadline) {

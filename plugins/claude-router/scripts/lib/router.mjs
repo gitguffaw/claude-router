@@ -26,8 +26,14 @@ function rejectDangerous(options) {
 }
 
 function rejectUnsupportedReviewTargeting(mode, options) {
-  if ((mode === "review" || mode === "adversarial-review") && (options.base || options.scope)) {
-    throw new Error("Claude Router review does not yet support --base or --scope target selection. Include the desired review target in the prompt, or use raw Claude CLI/git context explicitly.");
+  if (options.base || options.scope) {
+    throw new Error("Claude Router does not yet support --base or --scope target selection for routed modes. Include the desired target in the prompt, or use raw Claude CLI/git context explicitly.");
+  }
+}
+
+function rejectUnsupportedTimeoutAlias(options) {
+  if (options.timeout !== undefined && options.timeout !== null) {
+    throw new Error("Claude Router routed modes use --timeout-ms for managed job timeouts. Do not use --timeout here; it is reserved for Claude ultrareview.");
   }
 }
 
@@ -64,6 +70,7 @@ export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = nul
   if (options.search || options.webSearch || options["web-search"]) {
     throw new Error("Claude Router does not expose a native generic web-search shell command. Claude Code has in-session WebSearch and /deep-research surfaces; use --chrome for browser work or ask for MCP/docs verification.");
   }
+  rejectUnsupportedTimeoutAlias(options);
   rejectDangerous(options);
   rejectUnsupportedReviewTargeting(mode, options);
   requirePrompt(prompt);

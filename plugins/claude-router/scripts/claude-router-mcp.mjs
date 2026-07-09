@@ -5,145 +5,22 @@ import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import { MCP_TOOLS, ROUTED_COMMAND_NAMES } from "./lib/router-commands.mjs";
+import { ROUTED_BOOLEAN_CONTROLS, ROUTED_OPTIONAL_VALUE_CONTROLS, ROUTED_VALUE_CONTROLS, routedFlagEntries, routedInputSchemaProperties } from "./lib/routed-controls.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const COMPANION = path.join(ROOT, "scripts", "claude-companion.mjs");
 const PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8")).version;
 
-const tools = [
-  { name: "claude_router_setup", description: "Check local Claude CLI setup.", command: "setup" },
-  { name: "claude_router_surface", description: "Report the local Claude CLI version, top-level help, and Claude Router coverage.", command: "surface" },
-  { name: "claude_router_help", description: "Show Claude Router help, or local Claude CLI help when args are provided.", command: "help" },
-  { name: "claude_router_version", description: "Show Claude Router and installed Claude CLI versions.", command: "version" },
-  { name: "claude_router_raw", description: "Run a raw Claude CLI command with guardrails for mutating and dangerous operations.", command: "raw" },
-  { name: "claude_router_analyze", description: "Run read-only Claude analysis.", command: "analyze", prompt: true },
-  { name: "claude_router_plan", description: "Run read-only Claude planning.", command: "plan", prompt: true },
-  { name: "claude_router_exec", description: "Run write-capable Claude execution.", command: "exec", prompt: true },
-  { name: "claude_router_review", description: "Run read-only Claude review.", command: "review", prompt: true },
-  { name: "claude_router_adversarial_review", description: "Run read-only Claude challenge review.", command: "adversarial-review", prompt: true },
-  { name: "claude_router_ultrareview", description: "Run Claude ultrareview.", command: "ultrareview" },
-  { name: "claude_router_status", description: "Show Claude Router jobs.", command: "status" },
-  { name: "claude_router_result", description: "Show Claude Router job result.", command: "result" },
-  { name: "claude_router_cancel", description: "Cancel a Claude Router job.", command: "cancel" },
-  { name: "claude_router_models", description: "Return live Claude model selectors plus curated effort levels, permission modes, and modifier flags.", command: "models" }
-];
-
-const ROUTED_COMMANDS = new Set(["analyze", "plan", "exec", "review", "adversarial-review"]);
-const VALUE_FLAGS = [
-  ["--base", "base"],
-  ["--timeout", "timeout"],
-  ["--timeout-ms", "timeout_ms", "timeout-ms"],
-  ["--model", "model"],
-  ["--effort", "effort"],
-  ["--permission-mode", "permission_mode", "permission-mode"],
-  ["--plugin-dir", "plugin_dir", "plugin-dir"],
-  ["--plugin-url", "plugin_url", "plugin-url"],
-  ["--mcp-config", "mcp_config", "mcp-config"],
-  ["--settings", "settings"],
-  ["--setting-sources", "setting_sources", "setting-sources"],
-  ["--add-dir", "add_dir", "add-dir"],
-  ["--agent", "agent"],
-  ["--agents", "agents"],
-  ["--allowed-tools", "allowed_tools", "allowed-tools"],
-  ["--disallowed-tools", "disallowed_tools", "disallowed-tools"],
-  ["--tools", "tools"],
-  ["--append-system-prompt", "append_system_prompt", "append-system-prompt"],
-  ["--betas", "betas"],
-  ["--debug-file", "debug_file", "debug-file"],
-  ["--fallback-model", "fallback_model", "fallback-model"],
-  ["--file", "file"],
-  ["--from-pr", "from_pr", "from-pr"],
-  ["--input-format", "input_format", "input-format"],
-  ["--json-schema", "json_schema", "json-schema"],
-  ["--max-budget-usd", "max_budget_usd", "max-budget-usd"],
-  ["--name", "name"],
-  ["--output-format", "output_format", "output-format"],
-  ["--prompt-suggestions", "prompt_suggestions", "prompt-suggestions"],
-  ["--remote-control", "remote_control", "remote-control"],
-  ["--remote-control-session-name-prefix", "remote_control_session_name_prefix", "remote-control-session-name-prefix"],
-  ["--session-id", "session_id", "session-id"],
-  ["--scope", "scope"],
-  ["--system-prompt", "system_prompt", "system-prompt"]
-];
-const OPTIONAL_VALUE_FLAGS = [
-  ["--debug", "debug"],
-  ["--resume", "resume"],
-  ["--tmux", "tmux"],
-  ["--worktree", "worktree"]
-];
-const BOOLEAN_FLAGS = [
-  ["--background", "background"],
-  ["--best", "best"],
-  ["--sonnet", "sonnet"],
-  ["--opus", "opus"],
-  ["--haiku", "haiku"],
-  ["--long-context", "long_context", "long-context"],
-  ["--search", "search"],
-  ["--web-search", "web_search", "web-search", "webSearch"],
-  ["--chrome", "chrome"],
-  ["--no-chrome", "no_chrome", "no-chrome"],
-  ["--bare", "bare"],
-  ["--ultrathink", "ultrathink"],
-  ["--strict-mcp-config", "strict_mcp_config", "strict-mcp-config"],
-  ["--dangerously-skip-permissions", "dangerously_skip_permissions", "dangerously-skip-permissions", "bypass_permissions", "bypass-permissions"],
-  ["--allow-dangerous", "allow_dangerous", "allow-dangerous"],
-  ["--allow-dangerously-skip-permissions", "allow_dangerously_skip_permissions", "allow-dangerously-skip-permissions"],
-  ["--ax-screen-reader", "ax_screen_reader", "ax-screen-reader"],
-  ["--brief", "brief"],
-  ["--continue", "continue"],
-  ["--disable-slash-commands", "disable_slash_commands", "disable-slash-commands"],
-  ["--exclude-dynamic-system-prompt-sections", "exclude_dynamic_system_prompt_sections", "exclude-dynamic-system-prompt-sections"],
-  ["--fork-session", "fork_session", "fork-session"],
-  ["--ide", "ide"],
-  ["--include-hook-events", "include_hook_events", "include-hook-events"],
-  ["--include-partial-messages", "include_partial_messages", "include-partial-messages"],
-  ["--no-session-persistence", "no_session_persistence", "no-session-persistence"],
-  ["--replay-user-messages", "replay_user_messages", "replay-user-messages"],
-  ["--safe-mode", "safe_mode", "safe-mode"],
-  ["--verbose", "verbose"]
-];
+const tools = MCP_TOOLS;
+const ROUTED_COMMANDS = ROUTED_COMMAND_NAMES;
+const VALUE_FLAGS = routedFlagEntries(ROUTED_VALUE_CONTROLS);
+const OPTIONAL_VALUE_FLAGS = routedFlagEntries(ROUTED_OPTIONAL_VALUE_CONTROLS);
+const BOOLEAN_FLAGS = routedFlagEntries(ROUTED_BOOLEAN_CONTROLS);
 
 function schemaFor(tool) {
   const properties = {
-    cwd: { type: "string" },
-    job_id: { type: "string" },
-    args: { type: "array", items: { type: "string" } },
-    target: { type: "string" },
-    background: { type: "boolean" },
-    model: { type: "string" },
-    effort: { type: "string" },
-    chrome: { type: "boolean" },
-    timeout: { type: "string" },
-    timeout_ms: { type: "number" },
-    poll_interval_ms: { type: "number" },
-    wait: { type: "boolean" },
-    all: { type: "boolean" },
-    base: { type: "string" },
-    scope: { type: "string" },
-    search: { type: "boolean" },
-    web_search: { type: "boolean" },
-    debug: { oneOf: [{ type: "boolean" }, { type: "string" }] },
-    tmux: { oneOf: [{ type: "boolean" }, { type: "string" }] },
-    worktree: { oneOf: [{ type: "boolean" }, { type: "string" }] },
-    allow_mutating: { type: "boolean" },
-    allow_dangerous: { type: "boolean" },
-    permission_mode: { type: "string" },
-    output_format: { type: "string" },
-    input_format: { type: "string" },
-    mcp_config: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
-    plugin_dir: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
-    plugin_url: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
-    settings: { type: "string" },
-    setting_sources: { type: "string" },
-    add_dir: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
-    tools: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
-    allowed_tools: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
-    disallowed_tools: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
-    agent: { type: "string" },
-    agents: { type: "string" },
-    json_schema: { type: "string" },
-    resume: { oneOf: [{ type: "boolean" }, { type: "string" }] },
-    session_id: { type: "string" }
+    cwd: { type: "string" }
   };
   if (tool.command === "models") {
     return {
@@ -164,8 +41,32 @@ function schemaFor(tool) {
       required: []
     };
   }
-  if (tool.prompt) {
-    properties.prompt = { type: "string" };
+  if (ROUTED_COMMANDS.has(tool.command)) {
+    Object.assign(properties, routedInputSchemaProperties(), { prompt: { type: "string" } });
+  } else if (tool.command === "raw") {
+    Object.assign(properties, {
+      args: { type: "array", items: { type: "string" } },
+      timeout_ms: { type: "number" },
+      allow_mutating: { type: "boolean" },
+      allow_dangerous: { type: "boolean" }
+    });
+  } else if (tool.command === "help") {
+    properties.args = { type: "array", items: { type: "string" } };
+  } else if (tool.command === "status") {
+    Object.assign(properties, {
+      job_id: { type: "string" },
+      wait: { type: "boolean" },
+      all: { type: "boolean" },
+      timeout_ms: { type: "number" },
+      poll_interval_ms: { type: "number" }
+    });
+  } else if (tool.command === "result" || tool.command === "cancel") {
+    properties.job_id = { type: "string" };
+  } else if (tool.command === "ultrareview") {
+    Object.assign(properties, {
+      target: { type: "string" },
+      timeout: { type: "string" }
+    });
   }
   return {
     type: "object",
@@ -236,7 +137,7 @@ function callTool(name, input = {}) {
     appendRoutedFlags(args, input);
   }
   if (tool.command === "raw") {
-    if (input.timeout_ms) {
+    if (input.timeout_ms !== undefined && input.timeout_ms !== null) {
       args.push("--timeout-ms", String(input.timeout_ms));
     }
     if (input.allow_mutating || input["allow-mutating"]) {
@@ -255,10 +156,10 @@ function callTool(name, input = {}) {
     if (input.all) {
       args.push("--all");
     }
-    if (input.timeout_ms) {
+    if (input.timeout_ms !== undefined && input.timeout_ms !== null) {
       args.push("--timeout-ms", String(input.timeout_ms));
     }
-    if (input.poll_interval_ms) {
+    if (input.poll_interval_ms !== undefined && input.poll_interval_ms !== null) {
       args.push("--poll-interval-ms", String(input.poll_interval_ms));
     }
     if (input.job_id) {

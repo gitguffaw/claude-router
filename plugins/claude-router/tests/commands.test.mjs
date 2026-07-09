@@ -3,6 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { MCP_TOOLS, MCP_UNEXPOSED_COMMANDS, ROUTER_COMMANDS } from "../scripts/lib/router-commands.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -30,6 +31,18 @@ test("Claude Code plugin command palette exposes expected commands", () => {
     "ultrareview.md",
     "version.md"
   ]);
+});
+
+test("runtime command metadata stays aligned with host adapters", () => {
+  const commandFileNames = fs.readdirSync(path.join(ROOT, "commands"))
+    .map((file) => file.replace(/\.md$/, ""))
+    .sort();
+  const runtimeCommands = ROUTER_COMMANDS.map((command) => command.name).sort();
+  const mcpCommands = MCP_TOOLS.map((tool) => tool.command).sort();
+  const expectedMcpCommands = runtimeCommands.filter((command) => !MCP_UNEXPOSED_COMMANDS.has(command)).sort();
+
+  assert.deepEqual(commandFileNames, runtimeCommands);
+  assert.deepEqual(mcpCommands, expectedMcpCommands);
 });
 
 test("deterministic command files invoke the shared companion runtime", () => {

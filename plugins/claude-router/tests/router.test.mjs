@@ -72,9 +72,12 @@ test("unsupported web search and dangerous permissions fail clearly", () => {
   assert.throws(() => buildRouterRequest({ mode: "exec", prompt: "x", options: { "dangerously-skip-permissions": true } }), /Dangerous permission/);
   assert.throws(() => buildRouterRequest({ mode: "exec", prompt: "x", options: { "permission-mode": "bypassPermissions" } }), /Dangerous permission/);
   assert.throws(() => buildRouterRequest({ mode: "exec", prompt: "x", options: { "allow-dangerously-skip-permissions": true } }), /Dangerous permission/);
+  assert.throws(() => buildRouterRequest({ mode: "analyze", prompt: "x", options: { timeout: "30" } }), /use --timeout-ms/);
 });
 
 test("review target flags fail instead of pretending to scope the review", () => {
-  assert.throws(() => buildRouterRequest({ mode: "review", prompt: "x", options: { base: "main" } }), /does not yet support --base or --scope/);
-  assert.throws(() => buildRouterRequest({ mode: "adversarial-review", prompt: "x", options: { scope: "src" } }), /does not yet support --base or --scope/);
+  for (const mode of ["analyze", "plan", "exec", "review", "adversarial-review"]) {
+    assert.throws(() => buildRouterRequest({ mode, prompt: "x", options: { base: "main" } }), /does not yet support --base or --scope/);
+    assert.throws(() => buildRouterRequest({ mode, prompt: "x", options: { scope: "src" } }), /does not yet support --base or --scope/);
+  }
 });

@@ -9,6 +9,8 @@ import { getClaudeAuthStatus, getClaudeAvailability, getClaudeMcpStatus, getClau
 import { createContextPack } from "./lib/context-pack.mjs";
 import { handleCancel, handleResult, handleStatus } from "./lib/job-commands.mjs";
 import { renderModelCatalog, renderSetupReport, renderStartedJob } from "./lib/render.mjs";
+import { ROUTER_COMMANDS } from "./lib/router-commands.mjs";
+import { ROUTED_BOOLEAN_OPTIONS, ROUTED_OPTIONAL_VALUE_OPTIONS, ROUTED_REPEATABLE_OPTIONS, ROUTED_VALUE_OPTIONS } from "./lib/routed-controls.mjs";
 import { buildRouterRequest } from "./lib/router.mjs";
 import { binaryAvailable, runCommand, runProcess, spawnDetached } from "./lib/process.mjs";
 import { generateJobId, readJobFile, resolveJobFile, upsertJob, writeJobFile } from "./lib/state.mjs";
@@ -19,25 +21,6 @@ import { getModelCatalog } from "./lib/model-catalog.mjs";
 const SCRIPT = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8")).version;
-
-const ROUTER_COMMANDS = [
-  { name: "setup", summary: "Check Node, Claude CLI, auth, plugin, and MCP availability." },
-  { name: "surface", summary: "Show installed Claude CLI version/help plus Claude Router coverage." },
-  { name: "help", summary: "Show Claude Router help, or Claude CLI help when a command path is provided." },
-  { name: "version", summary: "Show Claude Router and installed Claude CLI versions." },
-  { name: "models", summary: "Show model selectors discovered from installed Claude CLI help plus curated controls." },
-  { name: "raw", summary: "Run raw Claude CLI args with mutation and dangerous-permission guardrails." },
-  { name: "cli", summary: "Alias for raw Claude CLI args with the same guardrails." },
-  { name: "analyze", summary: "Run read-only Claude analysis in print mode." },
-  { name: "plan", summary: "Run read-only Claude planning in print mode." },
-  { name: "exec", summary: "Run write-capable Claude execution in print mode." },
-  { name: "review", summary: "Run read-only Claude review in print mode." },
-  { name: "adversarial-review", summary: "Run read-only Claude challenge review in print mode." },
-  { name: "ultrareview", summary: "Run Claude's cloud-hosted ultrareview command." },
-  { name: "status", summary: "List or inspect Claude Router jobs." },
-  { name: "result", summary: "Show a stored Claude Router job result." },
-  { name: "cancel", summary: "Cancel an active Claude Router job." }
-];
 
 function normalizeArgv(argv) {
   if (argv.length === 1) {
@@ -50,8 +33,8 @@ function parseCommandInput(argv, config = {}) {
   return parseArgs(normalizeArgv(argv), {
     ...config,
     aliasMap: { C: "cwd", ...(config.aliasMap ?? {}) },
-    repeatableOptions: [...REPEATABLE_VALUES, ...(config.repeatableOptions ?? [])],
-    optionalValueOptions: [...OPTIONAL_VALUES, ...(config.optionalValueOptions ?? [])]
+    repeatableOptions: config.repeatableOptions ?? [],
+    optionalValueOptions: config.optionalValueOptions ?? []
   });
 }
 
@@ -61,6 +44,17 @@ function resolveCwd(options) {
 
 function output(value, asJson) {
   process.stdout.write(asJson ? `${JSON.stringify(value, null, 2)}\n` : value);
+}
+
+function parseNonNegativeTimeoutMs(value, defaultValue) {
+  if (value === null || value === undefined || value === "") {
+    return defaultValue;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid timeout "${value}". Use a non-negative millisecond value.`);
+  }
+  return parsed;
 }
 
 async function buildSetupReport(cwd) {
@@ -111,82 +105,11 @@ async function handleSetup(argv) {
   output(options.json ? report : renderSetupReport(report), Boolean(options.json));
 }
 
-const COMMON_VALUES = [
-  "cwd",
-  "model",
-  "effort",
-  "permission-mode",
-  "plugin-dir",
-  "plugin-url",
-  "mcp-config",
-  "settings",
-  "setting-sources",
-  "add-dir",
-  "base",
-  "scope",
-  "timeout",
-  "timeout-ms",
-  "agent",
-  "agents",
-  "allowed-tools",
-  "disallowed-tools",
-  "tools",
-  "append-system-prompt",
-  "betas",
-  "debug-file",
-  "fallback-model",
-  "file",
-  "from-pr",
-  "input-format",
-  "json-schema",
-  "max-budget-usd",
-  "name",
-  "output-format",
-  "prompt-suggestions",
-  "remote-control",
-  "remote-control-session-name-prefix",
-  "session-id",
-  "system-prompt"
-];
-const OPTIONAL_VALUES = ["debug", "resume", "tmux", "worktree"];
-const REPEATABLE_VALUES = ["plugin-dir", "plugin-url", "mcp-config", "add-dir", "allowed-tools", "disallowed-tools", "tools", "betas", "file"];
-const COMMON_BOOLEANS = [
-  "json",
-  "background",
-  "best",
-  "sonnet",
-  "opus",
-  "haiku",
-  "long-context",
-  "chrome",
-  "no-chrome",
-  "bare",
-  "ultrathink",
-  "strict-mcp-config",
-  "dangerously-skip-permissions",
-  "bypass-permissions",
-  "allow-dangerous",
-  "allow-dangerously-skip-permissions",
-  "search",
-  "webSearch",
-  "web-search",
-  "ax-screen-reader",
-  "brief",
-  "continue",
-  "disable-slash-commands",
-  "exclude-dynamic-system-prompt-sections",
-  "fork-session",
-  "ide",
-  "include-hook-events",
-  "include-partial-messages",
-  "no-session-persistence",
-  "replay-user-messages",
-  "safe-mode",
-  "verbose"
-];
+const COMMON_VALUES = ["cwd", "timeout", ...ROUTED_VALUE_OPTIONS];
+const COMMON_BOOLEANS = ["json", ...ROUTED_BOOLEAN_OPTIONS];
 
 function normalizeRepeatables(options) {
-  for (const key of REPEATABLE_VALUES) {
+  for (const key of ROUTED_REPEATABLE_OPTIONS) {
     if (options[key] && !Array.isArray(options[key])) {
       options[key] = [options[key]];
     }
@@ -414,7 +337,7 @@ async function handleRawClaude(argv) {
   const cwd = resolveCwd(options);
   const args = positionals;
   const classification = assertRawClaudeArgs(args, options);
-  const timeoutMs = Math.max(1000, Number(options["timeout-ms"]) || 300000);
+  const timeoutMs = parseNonNegativeTimeoutMs(options["timeout-ms"], 300000);
   const result = await runProcess("claude", args, { cwd, env: process.env, timeoutMs });
   const payload = { ...commandPayload(result), classification };
   output(options.json ? payload : renderCommandPayload(`claude ${args.join(" ")}`, payload), Boolean(options.json));
@@ -442,7 +365,12 @@ async function runStoredJob(workspaceRoot, jobId, options = {}) {
 }
 
 async function handleRouted(mode, argv) {
-  const { options, positionals } = parseCommandInput(argv, { valueOptions: COMMON_VALUES, booleanOptions: COMMON_BOOLEANS });
+  const { options, positionals } = parseCommandInput(argv, {
+    valueOptions: COMMON_VALUES,
+    booleanOptions: COMMON_BOOLEANS,
+    repeatableOptions: ROUTED_REPEATABLE_OPTIONS,
+    optionalValueOptions: ROUTED_OPTIONAL_VALUE_OPTIONS
+  });
   normalizeRepeatables(options);
   const cwd = resolveCwd(options);
   const workspaceRoot = resolveWorkspaceRoot(cwd);

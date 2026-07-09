@@ -2,6 +2,17 @@
 
 All notable changes to Claude Router are documented here.
 
+## [2.2.4] — 2026-07-09
+
+### Fixed
+
+- Centralized routed command and control metadata so companion CLI parsing, MCP tool schemas, and command-surface validation no longer duplicate the same flag lists.
+- Scoped MCP input schemas by command type so setup, raw, status, result, cancel, models, and ultrareview no longer advertise routed controls they ignore.
+- Preserved raw Claude passthrough flags that resemble routed controls, such as `--resume` and `--allowed-tools`, instead of consuming them before `--`.
+- Rejected unsupported routed `--timeout`, `--base`, and `--scope` usage clearly instead of silently treating them as ineffective routed controls.
+- Preserved numeric `0` timeout values for raw and status wait paths while continuing to reject invalid negative or non-numeric timeouts.
+- Hardened MCP JSON-RPC tests to handle newline-delimited responses split across stdout chunks.
+
 ## [2.2.3] — 2026-07-02
 
 ### Fixed

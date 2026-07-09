@@ -11,14 +11,25 @@ const SERVER = path.join(ROOT, "scripts", "claude-router-mcp.mjs");
 const PLUGIN = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
 
 function request(proc, message) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
     const onData = (chunk) => {
-      const line = String(chunk).trim().split(/\r?\n/).find(Boolean);
-      if (!line) {
-        return;
+      buffer += String(chunk);
+      let newline = buffer.indexOf("\n");
+      while (newline !== -1) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (line) {
+          proc.stdout.off("data", onData);
+          try {
+            resolve(JSON.parse(line));
+          } catch (error) {
+            reject(error);
+          }
+          return;
+        }
+        newline = buffer.indexOf("\n");
       }
-      proc.stdout.off("data", onData);
-      resolve(JSON.parse(line));
     };
     proc.stdout.on("data", onData);
     proc.stdin.write(`${JSON.stringify(message)}\n`);
@@ -34,6 +45,7 @@ test("mcp server lists tools", async () => {
     assert.equal(init.result.serverInfo.name, "claude-router");
     assert.equal(init.result.serverInfo.version, PLUGIN.version);
     const list = await request(proc, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    const toolByName = new Map(list.result.tools.map((tool) => [tool.name, tool]));
     assert.deepEqual(list.result.tools.map((tool) => tool.name).sort(), [
       "claude_router_adversarial_review",
       "claude_router_analyze",
@@ -51,6 +63,27 @@ test("mcp server lists tools", async () => {
       "claude_router_ultrareview",
       "claude_router_version"
     ].sort());
+    const analyze = toolByName.get("claude_router_analyze");
+    assert.equal(analyze.inputSchema.properties.append_system_prompt.type, "string");
+    assert.deepEqual(analyze.inputSchema.properties.betas, { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] });
+    assert.equal(analyze.inputSchema.properties.allow_dangerously_skip_permissions.type, "boolean");
+    assert.equal(analyze.inputSchema.properties.web_search.type, "boolean");
+    assert.equal(analyze.inputSchema.properties.timeout, undefined);
+    assert.equal(analyze.inputSchema.properties.timeout_ms.type, "number");
+
+    const setup = toolByName.get("claude_router_setup");
+    assert.equal(setup.inputSchema.properties.model, undefined);
+    assert.equal(setup.inputSchema.properties.background, undefined);
+
+    const raw = toolByName.get("claude_router_raw");
+    assert.equal(raw.inputSchema.properties.args.type, "array");
+    assert.equal(raw.inputSchema.properties.timeout_ms.type, "number");
+    assert.equal(raw.inputSchema.properties.model, undefined);
+
+    const status = toolByName.get("claude_router_status");
+    assert.equal(status.inputSchema.properties.timeout_ms.type, "number");
+    assert.equal(status.inputSchema.properties.poll_interval_ms.type, "number");
+    assert.equal(status.inputSchema.properties.model, undefined);
   } finally {
     proc.kill("SIGTERM");
   }

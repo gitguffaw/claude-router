@@ -73,6 +73,17 @@ console.log("fake claude");
   return fake;
 }
 
+function installArgEchoFakeClaude(binDir) {
+  fs.mkdirSync(binDir, { recursive: true });
+  const fake = path.join(binDir, "claude");
+  fs.writeFileSync(fake, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+console.log(JSON.stringify({ args }));
+`, "utf8");
+  fs.chmodSync(fake, 0o755);
+  return fake;
+}
+
 test("setup reports ready with fake claude", () => {
   const bin = makeTempDir();
   const data = makeTempDir();
@@ -192,12 +203,34 @@ test("raw guardrails classify command paths after global flags and do not trust 
   }
 });
 
+test("raw passthrough preserves routed optional and repeatable-looking flags before --", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installArgEchoFakeClaude(bin);
+  const result = run("node", [
+    SCRIPT,
+    "raw",
+    "--json",
+    "--resume",
+    "session-1",
+    "--allowed-tools",
+    "Read",
+    "--",
+    "-p",
+    "inspect"
+  ], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.deepEqual(JSON.parse(payload.stdout).args, ["--resume", "session-1", "--allowed-tools", "Read", "-p", "inspect"]);
+});
+
 test("routed commands reject dangerous permission bypass spellings without router override", () => {
   const bin = makeTempDir();
   const data = makeTempDir();
   installFakeClaude(bin);
   for (const args of [
     ["analyze", "--json", "--permission-mode", "bypassPermissions", "dangerous"],
+    ["exec", "--json", "--bypass-permissions", "dangerous"],
     ["exec", "--json", "--allow-dangerously-skip-permissions", "dangerous"]
   ]) {
     const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
@@ -218,6 +251,8 @@ test("routed commands reject CLI-level unsupported review and web search flags",
   for (const args of [
     ["review", "--json", "--scope", "src", "review target"],
     ["adversarial-review", "--json", "--scope", "src", "review target"],
+    ["analyze", "--json", "--base", "main", "inspect target"],
+    ["exec", "--json", "--timeout", "30", "change target"],
     ["analyze", "--json", "--webSearch", "find docs"],
     ["analyze", "--json", "--web-search", "find docs"]
   ]) {

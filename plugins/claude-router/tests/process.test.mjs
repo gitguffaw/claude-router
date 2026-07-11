@@ -229,3 +229,113 @@ test("runProcess keeps retrying tracking-failure termination until process is go
   assert.equal(result.verification?.matches, false);
   assert.equal(processAlive(result.pid), false);
 });
+
+test("runProcess captures stdout written after child exit via shared fd grandchild", async () => {
+  // Parent exits immediately; grandchild keeps the inherited stdout write end open and
+  // emits a marker shortly after. Settling on "exit" drops that chunk; "close" captures it.
+  const marker = "POST_EXIT_STDOUT_MARKER";
+  const grandchild = [
+    "setTimeout(() => {",
+    `  process.stdout.write(${JSON.stringify(marker)});`,
+    "  process.exit(0);",
+    "}, 100);"
+  ].join("");
+  const parent = [
+    "const { spawn } = require('child_process');",
+    `spawn(process.execPath, ${JSON.stringify(["-e", grandchild])}, {`,
+    "  stdio: ['ignore', 'inherit', 'ignore']",
+    "});",
+    "process.exit(0);"
+  ].join("");
+
+  const result = await runProcess(process.execPath, ["-e", parent], {
+    timeoutMs: 5000
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.timedOut, false);
+  assert.ok(
+    result.stdout.includes(marker),
+    `expected stdout to include ${marker}, got ${JSON.stringify(result.stdout)}`
+  );
+});
+
+test("runProcess settles via stream drain when detached grandchild keeps stdout open", async () => {
+  // No timeoutMs: without a bounded drain after "exit", a long-lived grandchild that
+  // inherits stdout would hang runProcess forever (close never fires).
+  const marker = "DRAIN_EXIT_MARKER";
+  const grandchild = [
+    "const fs = require('fs');",
+    // Self-timeout so the process cannot outlive CI if cleanup fails.
+    "setTimeout(() => process.exit(0), 15000);",
+    "process.on('SIGTERM', () => process.exit(0));",
+    "process.on('SIGINT', () => process.exit(0));",
+    // Keep the write end of the inherited stdout open until we exit.
+    "setInterval(() => {}, 1000);"
+  ].join("");
+  const parent = [
+    "const { spawn } = require('child_process');",
+    `process.stdout.write(${JSON.stringify(marker)});`,
+    `const child = spawn(process.execPath, ${JSON.stringify(["-e", grandchild])}, {`,
+    "  stdio: ['ignore', 'inherit', 'ignore'],",
+    "  detached: true",
+    "});",
+    "child.unref();",
+    // Emit pid so the test can kill the orphan if needed.
+    "process.stderr.write('GC_PID=' + child.pid + '\\n');",
+    "process.exit(0);"
+  ].join("");
+
+  let grandchildPid = null;
+  const started = Date.now();
+  const result = await runProcess(process.execPath, ["-e", parent], {
+    streamDrainTimeoutMs: 300,
+    onStderr: (chunk) => {
+      const match = String(chunk).match(/GC_PID=(\d+)/);
+      if (match) {
+        grandchildPid = Number(match[1]);
+      }
+    }
+  });
+  const elapsedMs = Date.now() - started;
+
+  try {
+    assert.equal(result.status, 0);
+    assert.equal(result.timedOut, false);
+    assert.ok(
+      result.stdout.includes(marker),
+      `expected stdout to include ${marker}, got ${JSON.stringify(result.stdout)}`
+    );
+    assert.ok(
+      elapsedMs < 5000,
+      `expected settle well under grandchild lifetime, took ${elapsedMs}ms`
+    );
+  } finally {
+    if (Number.isFinite(grandchildPid) && grandchildPid > 0) {
+      try {
+        process.kill(grandchildPid, "SIGTERM");
+      } catch {
+        // Already gone.
+      }
+      try {
+        process.kill(-grandchildPid, "SIGTERM");
+      } catch {
+        // Process group may not apply.
+      }
+    }
+  }
+});
+
+test("runProcess does not kill a fast child when timeoutMs exceeds setTimeout max delay", async () => {
+  // Node clamps setTimeout delays > 2^31-1 to ~1ms; without clamping, MAX_SAFE_INTEGER
+  // becomes an instant kill. A short-lived child must still complete successfully.
+  const result = await runProcess(
+    process.execPath,
+    ["-e", "setTimeout(() => { process.stdout.write('ok'); process.exit(0); }, 100);"],
+    { timeoutMs: Number.MAX_SAFE_INTEGER }
+  );
+
+  assert.equal(result.timedOut, false);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /ok/);
+});

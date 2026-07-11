@@ -161,6 +161,7 @@ export function runProcess(command, args = [], options = {}) {
     let settled = false;
     let timedOut = false;
     let trackingShutdownActive = false;
+    let streamDrainTimeout = null;
     const detached = options.detached ?? process.platform !== "win32";
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -180,6 +181,10 @@ export function runProcess(command, args = [], options = {}) {
       settled = true;
       if (timeout) {
         clearTimeout(timeout);
+      }
+      if (streamDrainTimeout) {
+        clearTimeout(streamDrainTimeout);
+        streamDrainTimeout = null;
       }
       resolve({ ...payload, timedOut, trackingFailed: Boolean(trackingError), trackingError });
     };
@@ -276,7 +281,10 @@ export function runProcess(command, args = [], options = {}) {
         });
       })();
     }
-    const timeoutMs = Number(options.timeoutMs) || 0;
+    // setTimeout clamps delays > 2^31-1 to ~1ms; cap so huge timeouts are not instant kills.
+    const MAX_TIMEOUT_MS = 2147483647;
+    const rawTimeoutMs = Number(options.timeoutMs) || 0;
+    const timeoutMs = rawTimeoutMs > 0 ? Math.min(rawTimeoutMs, MAX_TIMEOUT_MS) : 0;
     const timeout = timeoutMs > 0 ? setTimeout(() => {
       timedOut = true;
       void terminateProcessTree(processRecord, {
@@ -286,6 +294,11 @@ export function runProcess(command, args = [], options = {}) {
         allowUnverified: true
       });
     }, timeoutMs) : null;
+    // Descendants inheriting stdio can keep "close" from firing after "exit"; bound the wait.
+    const rawStreamDrainMs = Number(options.streamDrainTimeoutMs);
+    const streamDrainMs = Number.isFinite(rawStreamDrainMs) && rawStreamDrainMs >= 0
+      ? Math.min(rawStreamDrainMs, MAX_TIMEOUT_MS)
+      : 2000;
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -312,7 +325,41 @@ export function runProcess(command, args = [], options = {}) {
         processGroup: processRecord.processGroup
       });
     });
+    // Prefer "close" (stdio drained). If descendants keep pipes open, drain after "exit".
     child.on("exit", (status, signal) => {
+      if (settled || trackingShutdownActive || streamDrainTimeout) {
+        return;
+      }
+      streamDrainTimeout = setTimeout(() => {
+        streamDrainTimeout = null;
+        if (settled || trackingShutdownActive) {
+          return;
+        }
+        try {
+          child.stdout?.destroy();
+        } catch {
+          // Already closed.
+        }
+        try {
+          child.stderr?.destroy();
+        } catch {
+          // Already closed.
+        }
+        finish({
+          command,
+          args,
+          status: status ?? (signal ? 1 : 0),
+          signal: signal ?? null,
+          stdout,
+          stderr,
+          error: trackingError,
+          pid: child.pid ?? null,
+          processStartTime: processRecord.processStartTime,
+          processGroup: processRecord.processGroup
+        });
+      }, streamDrainMs);
+    });
+    child.on("close", (status, signal) => {
       finish({
         command,
         args,

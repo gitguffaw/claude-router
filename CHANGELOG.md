@@ -2,6 +2,24 @@
 
 All notable changes to Claude Router are documented here.
 
+## [2.3.1] — 2026-07-11
+
+### Fixed
+
+- Fixed a race where a concurrent status call could mark an exited foreground Claude child stale before the companion committed its result, discarding a successful job as failed; stale-marking now skips jobs whose supervising companion is still alive and re-verifies process identity under the state lock.
+- Stopped job retention from pruning queued, running, or cancelling jobs; only terminal records count against the 50-job cap, so long-running jobs can no longer lose their index entry, job file, and log mid-flight.
+- Serialized stale state-lock recovery through a reaper sidecar lock and added commit-time lock-ownership verification with bounded retries, closing an ABA race that could let two processes write state concurrently.
+- Replaced the MCP server's synchronous untimed dispatch with async concurrent dispatch (16-slot FIFO limit, 20MB output cap, 35-minute outer deadline via `CLAUDE_ROUTER_MCP_OUTER_TIMEOUT_MS`), so one slow tool call no longer blocks status and cancel for the whole server; in-flight companions are swept on shutdown.
+- Quarantined corrupt state and job files as `.corrupt-<timestamp>` and rebuilt the index from readable job files instead of silently resetting to empty state and permanently baking in the loss on the next save.
+- Classified raw top-level `rm`, `stop`, and `respawn` as mutating so destructive session commands require `--allow-mutating` consent.
+- Settled managed child processes on stdio close with a bounded drain instead of process exit, preventing truncated JSON results from successful jobs while keeping no-timeout callers from hanging on inherited pipes.
+- Required an explicit `--raw-arg-string` marker for slash-command argument retokenization so flag-like text in a direct single-argument prompt can no longer become live options.
+- Verified the whole POSIX process group during cancellation and escalate until it is empty, so SIGTERM-trapping descendants can no longer survive a job reported as cancelled; escalation halts if the leader pid is detected as reused.
+- Made job log writes non-throwing so a full disk or deleted log directory cannot crash the supervising companion and orphan its Claude child.
+- Resolved MCP `cwd` once at the server boundary, fixing relative paths that were resolved twice into `repo/repo`.
+- Declared process timers before the spawn-tracking path, fixing a temporal-dead-zone error that left the process promise unsettled forever when tracking failed after a fast child exit.
+- Hardened process timeouts against Node's 32-bit `setTimeout` clamp, JSON-RPC parse errors now include `id: null`, and spawn failures report the underlying error instead of `exit null`.
+
 ## [2.3.0] — 2026-07-11
 
 ### Added

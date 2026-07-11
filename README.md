@@ -1,6 +1,6 @@
 # Claude Router
 
-Current release: `v2.3.0`
+Current release: `v2.3.1`
 
 Claude Router lets a host agent delegate work to the local Claude Code CLI through policy-backed modes for setup, analysis, planning, implementation, review, model and capability discovery, background jobs, result retrieval, and guarded access to installed Claude CLI features.
 

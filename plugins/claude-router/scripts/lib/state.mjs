@@ -11,10 +11,16 @@ const MAX_JOBS = 50;
 const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
 const STATE_FILE_NAME = "state.json";
 const LOCK_FILE_NAME = "state.lock";
+const REAPER_LOCK_SUFFIX = ".reap";
 const JOBS_DIR_NAME = "jobs";
 const DEFAULT_LOCK_TIMEOUT_MS = 5000;
 const DEFAULT_LOCK_STALE_MS = 10000;
 const LOCK_POLL_MS = 15;
+// Reaper is held only across a few syscalls; short mtime backstop for malformed reapers.
+const REAPER_STALE_MS = 3000;
+const LOCK_LOST_MAX_ATTEMPTS = 3;
+const LOCK_POLL_JITTER_MS = 10;
+const LOCK_LOST_CODE = "CLAUDE_ROUTER_LOCK_LOST";
 
 function nowIso() {
   return new Date().toISOString();
@@ -48,6 +54,10 @@ export function resolveStateFile(cwd) {
 
 export function resolveLockFile(cwd) {
   return path.join(resolveStateDir(cwd), LOCK_FILE_NAME);
+}
+
+function resolveReaperFile(lockFile) {
+  return `${lockFile}${REAPER_LOCK_SUFFIX}`;
 }
 
 export function resolveJobFile(cwd, jobId) {
@@ -301,6 +311,66 @@ function isLockStale(lockFile, staleMs) {
   return false;
 }
 
+/**
+ * Reaper staleness: dead owner by identity wins; malformed/unreadable only after
+ * a short mtime backstop (reaper is held across a few syscalls only).
+ */
+function isReaperStale(reaperFile, reaperStaleMs = REAPER_STALE_MS) {
+  const meta = readLockMeta(reaperFile);
+  if (meta) {
+    const owner = lockOwnerStatus(meta);
+    if (owner.hasOwner) {
+      return !owner.live;
+    }
+  }
+  try {
+    const stat = fs.statSync(reaperFile);
+    return Date.now() - stat.mtimeMs >= reaperStaleMs;
+  } catch {
+    // Gone or unstatable — treat as free for the next acquisition attempt.
+    return true;
+  }
+}
+
+function sameLockIdentity(meta, identity) {
+  if (!meta || !identity) {
+    return false;
+  }
+  if (Number(meta.pid) !== Number(identity.pid)) {
+    return false;
+  }
+  return (meta.processStartTime ?? null) === (identity.processStartTime ?? null);
+}
+
+function lockLostError(detail) {
+  const error = new Error(detail ?? "Claude Router state lock ownership lost");
+  error.code = LOCK_LOST_CODE;
+  return error;
+}
+
+/**
+ * Confirm the lock file still exists and is held by our identity.
+ * Call immediately before the first write of a commit under withStateLock.
+ */
+function assertLockOwnership(lockFile, identity) {
+  if (!identity) {
+    throw lockLostError("Claude Router state lock ownership lost: missing holder identity");
+  }
+  let exists = false;
+  try {
+    exists = fs.existsSync(lockFile);
+  } catch {
+    exists = false;
+  }
+  if (!exists) {
+    throw lockLostError("Claude Router state lock ownership lost: lock file missing");
+  }
+  const meta = readLockMeta(lockFile);
+  if (!sameLockIdentity(meta, identity)) {
+    throw lockLostError("Claude Router state lock ownership lost: lock held by another process");
+  }
+}
+
 function tryAcquireLock(lockFile, identity) {
   const payload = `${JSON.stringify({
     pid: identity.pid,
@@ -318,10 +388,25 @@ function tryAcquireLock(lockFile, identity) {
   }
 }
 
-function releaseLock(lockFile) {
+function releaseLock(lockFile, identity) {
   try {
     const meta = readLockMeta(lockFile);
-    if (meta && Number(meta.pid) !== process.pid) {
+    // Unreadable/corrupt lock: never unlink here (non-owner must not clear it).
+    // Stale recovery uses mtime backstop for genuinely abandoned corrupt locks.
+    if (!meta) {
+      return;
+    }
+    const expectedPid = identity?.pid ?? process.pid;
+    if (Number(meta.pid) !== Number(expectedPid)) {
+      return;
+    }
+    // When we know our start identity, refuse to unlink a recycled-pid foreign lock.
+    if (
+      identity &&
+      identity.processStartTime != null &&
+      meta.processStartTime != null &&
+      meta.processStartTime !== identity.processStartTime
+    ) {
       return;
     }
     fs.unlinkSync(lockFile);
@@ -330,43 +415,101 @@ function releaseLock(lockFile) {
   }
 }
 
+/**
+ * Stale main-lock recovery is serialized through state.lock.reap so concurrent
+ * recoverers cannot unlink a freshly wx-created main lock (ABA/TOCTOU).
+ * Holding the reaper: re-validate main is still stale, unlink main only, release
+ * reaper, then re-enter normal main wx acquisition (never grab main while holding reaper).
+ * @returns {boolean} true when progress was made (caller should retry main wx promptly)
+ */
+function tryReapStaleLock(lockFile, identity, staleMs) {
+  const reaperFile = resolveReaperFile(lockFile);
+  if (tryAcquireLock(reaperFile, identity)) {
+    try {
+      if (isLockStale(lockFile, staleMs)) {
+        try {
+          fs.unlinkSync(lockFile);
+        } catch {
+          // Main may have vanished between re-check and unlink.
+        }
+        return true;
+      }
+      // Main became fresh/live under another owner — do not touch it.
+      return false;
+    } finally {
+      releaseLock(reaperFile, identity);
+    }
+  }
+  // Another process holds (or abandoned) the reaper. Recover only when reaper is stale.
+  if (isReaperStale(reaperFile)) {
+    try {
+      fs.unlinkSync(reaperFile);
+    } catch {
+      // Best-effort; next loop iteration retries reaper acquisition.
+    }
+    return true;
+  }
+  return false;
+}
+
+function lockPollDelayMs() {
+  return LOCK_POLL_MS + Math.floor(Math.random() * (LOCK_POLL_JITTER_MS + 1));
+}
+
+function acquireStateLock(lockFile, identity, timeoutMs, staleMs) {
+  const startedAt = Date.now();
+  for (;;) {
+    if (tryAcquireLock(lockFile, identity)) {
+      return;
+    }
+    if (isLockStale(lockFile, staleMs)) {
+      if (tryReapStaleLock(lockFile, identity, staleMs)) {
+        // Reaped main or freed a stale reaper — retry main wx without waiting.
+        continue;
+      }
+      // Live reaper holder in progress, or main no longer stale after re-check.
+    }
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`Timed out after ${timeoutMs}ms waiting for Claude Router state lock at ${lockFile}`);
+    }
+    sleepMs(lockPollDelayMs());
+  }
+}
+
 function withStateLock(cwd, fn) {
   ensureStateDir(cwd);
   const lockFile = resolveLockFile(cwd);
   const timeoutMs = lockTimeoutMs();
   const staleMs = lockStaleMs();
-  const startedAt = Date.now();
-  // Resolve holder identity once per acquisition attempt; poll retries reuse it.
+  // Resolve holder identity once; all acquisition/commit attempts reuse it.
   const identity = buildProcessRecord(process.pid);
-  let acquired = false;
+  let lastLockLost = null;
 
-  while (!acquired) {
-    if (tryAcquireLock(lockFile, identity)) {
-      acquired = true;
-      break;
-    }
-    if (isLockStale(lockFile, staleMs)) {
-      try {
-        fs.unlinkSync(lockFile);
-      } catch {
-        // Another process may have recovered the lock first.
+  for (let attempt = 1; attempt <= LOCK_LOST_MAX_ATTEMPTS; attempt += 1) {
+    acquireStateLock(lockFile, identity, timeoutMs, staleMs);
+    try {
+      return fn(identity);
+    } catch (error) {
+      if (error && error.code === LOCK_LOST_CODE) {
+        lastLockLost = error;
+        if (attempt < LOCK_LOST_MAX_ATTEMPTS) {
+          continue;
+        }
+        throw new Error(
+          `Claude Router state lock ownership lost during commit after ${LOCK_LOST_MAX_ATTEMPTS} attempts at ${lockFile}`
+        );
       }
-      continue;
+      throw error;
+    } finally {
+      releaseLock(lockFile, identity);
     }
-    if (Date.now() - startedAt >= timeoutMs) {
-      throw new Error(`Timed out after ${timeoutMs}ms waiting for Claude Router state lock at ${lockFile}`);
-    }
-    sleepMs(LOCK_POLL_MS);
   }
 
-  try {
-    return fn();
-  } finally {
-    releaseLock(lockFile);
-  }
+  // Unreachable when LOCK_LOST_MAX_ATTEMPTS >= 1; keeps static analysis happy.
+  throw lastLockLost ?? new Error(`Claude Router state lock ownership lost at ${lockFile}`);
 }
 
-function saveStateUnlocked(cwd, state) {
+function saveStateUnlocked(cwd, state, identity) {
   // Load the live index under the caller-held lock so cleanup never uses a
   // stale snapshot from before concurrent writers finished.
   const previousJobs = loadState(cwd).jobs;
@@ -374,6 +517,8 @@ function saveStateUnlocked(cwd, state) {
   const nextJobs = pruneJobs(state.jobs ?? []);
   const retained = new Set(nextJobs.map((job) => job.id).filter(Boolean));
   const nextState = { version: STATE_VERSION, config: state.config ?? {}, jobs: nextJobs };
+  // Commit-time ownership check: refuse to write if our lock was stolen/unlinked.
+  assertLockOwnership(resolveLockFile(cwd), identity);
   writeJsonAtomic(resolveStateFile(cwd), nextState);
   for (const job of previousJobs) {
     if (!job?.id || retained.has(job.id)) {
@@ -386,14 +531,19 @@ function saveStateUnlocked(cwd, state) {
 }
 
 export function saveState(cwd, state) {
-  return withStateLock(cwd, () => saveStateUnlocked(cwd, state));
+  return withStateLock(cwd, (identity) => saveStateUnlocked(cwd, state, identity));
 }
 
+/**
+ * Apply a pure state transform under the workspace lock.
+ * `mutate` may run more than once (commit retry after lock-ownership loss)
+ * and must not perform side effects outside transforming `state`.
+ */
 export function updateState(cwd, mutate) {
-  return withStateLock(cwd, () => {
+  return withStateLock(cwd, (identity) => {
     const state = loadState(cwd);
     mutate(state);
-    return saveStateUnlocked(cwd, state);
+    return saveStateUnlocked(cwd, state, identity);
   });
 }
 
@@ -450,7 +600,7 @@ export function transitionJob(cwd, jobId, decide) {
   if (!jobId) {
     throw new Error("transitionJob requires a job id.");
   }
-  return withStateLock(cwd, () => {
+  return withStateLock(cwd, (identity) => {
     const state = loadState(cwd);
     const index = state.jobs.findIndex((job) => job.id === jobId);
     const indexJob = index >= 0 ? state.jobs[index] : null;
@@ -483,8 +633,10 @@ export function transitionJob(cwd, jobId, decide) {
       state.jobs[index] = next;
     }
     ensureStateDir(cwd);
+    // First write of this commit is the per-job file; verify ownership before it.
+    assertLockOwnership(resolveLockFile(cwd), identity);
     writeJsonAtomic(file, next);
-    saveStateUnlocked(cwd, state);
+    saveStateUnlocked(cwd, state, identity);
     return {
       applied: true,
       reason: decision.reason ?? "applied",

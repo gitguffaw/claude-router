@@ -18,6 +18,7 @@ import {
   resolveStateFile,
   saveState,
   transitionJob,
+  updateState,
   upsertJob,
   writeJobFile
 } from "../scripts/lib/state.mjs";
@@ -389,6 +390,226 @@ try {
       holder.kill("SIGKILL");
     }
     cleanupDir(workerDir);
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("concurrent stale-lock recovery via reaper retains every mutation", async () => {
+  // ABA/TOCTOU: many processes race to recover one dead main lock. Reaper serializes
+  // unlink so a fresh lock cannot be deleted by a delayed recoverer.
+  const processCount = 8;
+  const iterations = 4;
+  const workerDir = makeTempDir();
+  const workerScript = path.join(workerDir, "reap-recover-worker.mjs");
+  fs.writeFileSync(workerScript, `import { upsertJob } from ${JSON.stringify(STATE_MODULE)};
+const cwd = process.argv[2];
+const id = process.argv[3];
+upsertJob(cwd, { id, status: "completed", mode: "analyze", summary: id });
+process.stdout.write(\`ok:\${id}\`);
+`, "utf8");
+
+  try {
+    for (let round = 0; round < iterations; round += 1) {
+      const dataDir = makeTempDir();
+      const cwd = makeTempDir();
+      try {
+        withDataDir(dataDir, () => {
+          ensureStateDir(cwd);
+          const lockFile = resolveLockFile(cwd);
+          // Abandoned main lock from a dead pid (identity-stale, not age-dependent).
+          fs.writeFileSync(
+            lockFile,
+            `${JSON.stringify({
+              pid: 999999991,
+              processStartTime: "Mon Jan  1 00:00:00 2000",
+              createdAt: Date.now() - 60_000
+            })}\n`,
+            { encoding: "utf8", mode: 0o600 }
+          );
+        });
+
+        const env = {
+          ...process.env,
+          CLAUDE_ROUTER_DATA: dataDir,
+          CLAUDE_ROUTER_STATE_LOCK_TIMEOUT_MS: "60000"
+        };
+        const results = await Promise.all(
+          Array.from({ length: processCount }, (_, index) => {
+            const id = `reap-r${round}-j${String(index).padStart(2, "0")}`;
+            return runWorker(workerScript, [cwd, id], env).then((result) => ({ id, ...result }));
+          })
+        );
+
+        for (const result of results) {
+          assert.equal(result.code, 0, `round ${round} worker ${result.id} failed: ${result.stderr || result.stdout}`);
+        }
+
+        withDataDir(dataDir, () => {
+          const jobs = listJobs(cwd);
+          assert.equal(jobs.length, processCount, `round ${round}: expected ${processCount} jobs, got ${jobs.length}`);
+          const indexedIds = new Set(jobs.map((job) => job.id));
+          for (let index = 0; index < processCount; index += 1) {
+            const id = `reap-r${round}-j${String(index).padStart(2, "0")}`;
+            assert.ok(indexedIds.has(id), `round ${round}: missing job ${id}`);
+          }
+          const stateDir = resolveStateDir(cwd);
+          assert.ok(!fs.existsSync(resolveLockFile(cwd)), "main lock must be released");
+          assert.ok(!fs.existsSync(`${resolveLockFile(cwd)}.reap`), "reaper lock must not remain");
+          const stateNames = fs.readdirSync(stateDir).filter((name) => name === "state.json" || name.startsWith("state.json."));
+          assert.equal(stateNames.filter((name) => name === "state.json").length, 1, "exactly one state.json");
+          assert.ok(fs.existsSync(resolveStateFile(cwd)));
+          // No leftover temp or split index files from concurrent writers.
+          assert.equal(
+            stateNames.filter((name) => name !== "state.json").length,
+            0,
+            `unexpected state sidecars: ${stateNames.join(",")}`
+          );
+        });
+      } finally {
+        cleanupDir(dataDir);
+        cleanupDir(cwd);
+      }
+    }
+  } finally {
+    cleanupDir(workerDir);
+  }
+});
+
+test("commit ownership verification retries after lock steal mid-mutate", () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  try {
+    withDataDir(dataDir, () => {
+      ensureStateDir(cwd);
+      let mutateCalls = 0;
+      const state = updateState(cwd, (draft) => {
+        mutateCalls += 1;
+        if (mutateCalls === 1) {
+          // Sabotage: drop our held lock and plant a foreign dead identity.
+          const lockFile = resolveLockFile(cwd);
+          try {
+            fs.unlinkSync(lockFile);
+          } catch {
+            // ignore
+          }
+          fs.writeFileSync(
+            lockFile,
+            `${JSON.stringify({
+              pid: 999999992,
+              processStartTime: "Tue Jan  2 00:00:00 2001",
+              createdAt: Date.now() - 60_000
+            })}\n`,
+            { flag: "wx", encoding: "utf8", mode: 0o600 }
+          );
+        }
+        draft.jobs.unshift({
+          id: "commit-verify-job",
+          status: "completed",
+          mode: "analyze",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      });
+      assert.equal(mutateCalls, 2, "mutate must re-run exactly once after lock-lost retry");
+      assert.equal(state.jobs.length, 1);
+      assert.equal(state.jobs[0].id, "commit-verify-job");
+      assert.equal(listJobs(cwd).length, 1);
+      assert.ok(!fs.existsSync(resolveLockFile(cwd)));
+      assert.ok(!fs.existsSync(`${resolveLockFile(cwd)}.reap`));
+    });
+  } finally {
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("stale reaper lock is recovered then main lock is reaped", () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  try {
+    withDataDir(dataDir, () => {
+      ensureStateDir(cwd);
+      const lockFile = resolveLockFile(cwd);
+      const reaperFile = `${lockFile}.reap`;
+      const deadPayload = `${JSON.stringify({
+        pid: 999999993,
+        processStartTime: "Wed Jan  3 00:00:00 2002",
+        createdAt: Date.now() - 60_000
+      })}\n`;
+      fs.writeFileSync(lockFile, deadPayload, { encoding: "utf8", mode: 0o600 });
+      fs.writeFileSync(reaperFile, deadPayload, { encoding: "utf8", mode: 0o600 });
+      // Age the reaper mtime past the short reaper backstop (covers malformed path too).
+      const old = new Date(Date.now() - 10_000);
+      fs.utimesSync(reaperFile, old, old);
+
+      const state = updateState(cwd, (draft) => {
+        draft.jobs.unshift({
+          id: "reaper-stale-job",
+          status: "completed",
+          mode: "analyze",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      });
+      assert.equal(state.jobs.length, 1);
+      assert.equal(state.jobs[0].id, "reaper-stale-job");
+      assert.ok(!fs.existsSync(lockFile), "main lock released");
+      assert.ok(!fs.existsSync(reaperFile), "stale reaper must be cleared");
+    });
+  } finally {
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("lock ownership lost on every attempt exhausts retries without writing state", () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  try {
+    withDataDir(dataDir, () => {
+      ensureStateDir(cwd);
+      const stateFile = resolveStateFile(cwd);
+      assert.ok(!fs.existsSync(stateFile), "precondition: no state.json yet");
+      let mutateCalls = 0;
+      assert.throws(
+        () => {
+          updateState(cwd, (draft) => {
+            mutateCalls += 1;
+            // Steal on every invocation so commit verification always fails.
+            const lockFile = resolveLockFile(cwd);
+            try {
+              fs.unlinkSync(lockFile);
+            } catch {
+              // ignore
+            }
+            fs.writeFileSync(
+              lockFile,
+              `${JSON.stringify({
+                pid: 999999994,
+                processStartTime: `steal-${mutateCalls}-Mon Jan  1 00:00:00 1999`,
+                createdAt: Date.now() - 60_000
+              })}\n`,
+              { flag: "wx", encoding: "utf8", mode: 0o600 }
+            );
+            draft.jobs.unshift({
+              id: "must-not-commit",
+              status: "completed",
+              mode: "analyze",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            });
+          });
+        },
+        (error) =>
+          error instanceof Error &&
+          /lock ownership lost during commit after 3 attempts/i.test(error.message)
+      );
+      assert.equal(mutateCalls, 3, "mutate must run once per exhausted attempt");
+      assert.ok(!fs.existsSync(stateFile), "no partial state.json write on lock-lost exhaustion");
+      assert.equal(listJobs(cwd).length, 0);
+    });
+  } finally {
     cleanupDir(dataDir);
     cleanupDir(cwd);
   }

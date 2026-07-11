@@ -23,6 +23,8 @@ import {
 } from "../scripts/lib/state.mjs";
 import {
   ACTIVE_JOB_STATUSES,
+  appendLogLine,
+  createJobLogFile,
   isCancelInProgress,
   runTrackedJob,
   trackChildProcessIdentity
@@ -795,6 +797,157 @@ test("cancel failure releases ownership so runTrackedJob can complete", async ()
       rendered: "done",
       warnings: []
     }), { trackChildProcess: false });
+
+    assert.equal(result.status, "completed");
+    assert.equal(readJobFile(cwd, job.id).status, "completed");
+    assert.equal(listJobs(cwd).find((entry) => entry.id === job.id).status, "completed");
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("runTrackedJob completes when log directory is removed mid-run", async () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    const logDir = path.join(dataDir, "volatile-logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFile = path.join(logDir, "mid-run.log");
+    fs.writeFileSync(logFile, "", "utf8");
+
+    const job = {
+      id: "log-sink-mid-run",
+      workspaceRoot: cwd,
+      status: "queued",
+      phase: "queued",
+      mode: "analyze",
+      logFile
+    };
+    writeJobFile(cwd, job.id, job);
+    upsertJob(cwd, job);
+
+    const result = await runTrackedJob(job, async () => {
+      fs.rmSync(logDir, { recursive: true, force: true });
+      appendLogLine(logFile, "progress after log dir removed");
+      appendLogLine(logFile, "second progress chunk");
+      return {
+        exitStatus: 0,
+        jobStatus: "completed",
+        payload: { ok: true },
+        rendered: "done-despite-log-failure",
+        warnings: []
+      };
+    });
+
+    assert.equal(result.status, "completed");
+    assert.equal(result.rendered, "done-despite-log-failure");
+    const stored = readJobFile(cwd, job.id);
+    assert.equal(stored.status, "completed");
+    assert.equal(stored.phase, "done");
+    assert.ok(stored.completedAt);
+    assert.equal(listJobs(cwd).find((entry) => entry.id === job.id).status, "completed");
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("runTrackedJob catch path commits failed terminal state when log writes fail", async () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    const logFile = path.join(dataDir, "missing-parent", "catch-path.log");
+    const job = {
+      id: "log-sink-catch",
+      workspaceRoot: cwd,
+      status: "queued",
+      phase: "queued",
+      mode: "analyze",
+      logFile
+    };
+    writeJobFile(cwd, job.id, job);
+    upsertJob(cwd, job);
+
+    const result = await runTrackedJob(job, async () => {
+      throw new Error("runner exploded after bad log sink");
+    });
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.phase, "failed");
+    assert.match(result.result?.error ?? "", /runner exploded/);
+    const stored = readJobFile(cwd, job.id);
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.phase, "failed");
+    assert.ok(stored.completedAt);
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("appendLogLine does not throw on missing parent and short-circuits after failure", () => {
+  const missing = path.join(makeTempDir(), "no-such-dir", "job.log");
+  assert.doesNotThrow(() => appendLogLine(missing, "first line"));
+  assert.doesNotThrow(() => appendLogLine(missing, "second line"));
+  assert.doesNotThrow(() => appendLogLine(null, "ignored"));
+  assert.doesNotThrow(() => appendLogLine("", "ignored"));
+});
+
+test("createJobLogFile on unwritable sink returns without throwing and runTrackedJob still commits", async () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    // No jobs directory under state; createJobLogFile must not throw.
+    let logFile;
+    assert.doesNotThrow(() => {
+      logFile = createJobLogFile(cwd, "create-fail-job", "Claude analyze");
+    });
+    assert.ok(typeof logFile === "string" && logFile.length > 0);
+    assert.equal(fs.existsSync(logFile), false);
+
+    const job = {
+      id: "create-fail-job",
+      workspaceRoot: cwd,
+      status: "queued",
+      phase: "queued",
+      mode: "analyze",
+      logFile
+    };
+    writeJobFile(cwd, job.id, job);
+    upsertJob(cwd, job);
+
+    const result = await runTrackedJob(job, async () => {
+      appendLogLine(logFile, "progress with failed sink");
+      return {
+        exitStatus: 0,
+        jobStatus: "completed",
+        payload: { ok: true },
+        rendered: "terminal-ok",
+        warnings: []
+      };
+    });
 
     assert.equal(result.status, "completed");
     assert.equal(readJobFile(cwd, job.id).status, "completed");

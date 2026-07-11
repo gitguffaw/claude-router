@@ -26,9 +26,30 @@ function redactSecrets(value) {
     .replace(/(sk-[A-Za-z0-9_-]{12,})/g, "sk-REDACTED");
 }
 
+/** Log paths that failed a write; further appends for that path are no-ops. */
+const failedLogFiles = new Set();
+
+function noteLogWriteFailure(logFile, detail) {
+  if (!logFile || failedLogFiles.has(logFile)) {
+    return;
+  }
+  failedLogFiles.add(logFile);
+  try {
+    process.stderr.write(`[claude-router] ${detail}: ${logFile}\n`);
+  } catch {
+    // best-effort only; never throw from logging
+  }
+}
+
 export function createJobLogFile(workspaceRoot, jobId, title) {
   const logFile = resolveJobLogFile(workspaceRoot, jobId);
-  fs.writeFileSync(logFile, "", { encoding: "utf8", mode: 0o600 });
+  try {
+    fs.writeFileSync(logFile, "", { encoding: "utf8", mode: 0o600 });
+  } catch {
+    // Return the intended path so job records stay stable; appendLogLine will no-op.
+    noteLogWriteFailure(logFile, "unable to create job log file; further log lines for this file will be skipped");
+    return logFile;
+  }
   if (title) {
     appendLogLine(logFile, `Starting ${title}.`);
   }
@@ -37,10 +58,14 @@ export function createJobLogFile(workspaceRoot, jobId, title) {
 
 export function appendLogLine(logFile, message) {
   const text = redactSecrets(message).trim();
-  if (!logFile || !text) {
+  if (!logFile || !text || failedLogFiles.has(logFile)) {
     return;
   }
-  fs.appendFileSync(logFile, `[${nowIso()}] ${text}\n`, "utf8");
+  try {
+    fs.appendFileSync(logFile, `[${nowIso()}] ${text}\n`, "utf8");
+  } catch {
+    noteLogWriteFailure(logFile, "job log write failed; further log lines for this file will be skipped");
+  }
 }
 
 export function cancelledJobResult(job) {

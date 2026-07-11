@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "./helpers.mjs";
+import { buildProcessRecord, currentProcessRecord } from "../scripts/lib/process.mjs";
 import {
   listJobs,
   readJobFile,
@@ -16,7 +17,7 @@ import {
   writeJobFile
 } from "../scripts/lib/state.mjs";
 import { isCancelInProgress, runTrackedJob, trackChildProcessIdentity } from "../scripts/lib/tracked-jobs.mjs";
-import { handleCancel } from "../scripts/lib/job-commands.mjs";
+import { handleCancel, refreshStaleActiveJobs } from "../scripts/lib/job-commands.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const STATE_MODULE = path.join(ROOT, "scripts/lib/state.mjs");
@@ -688,6 +689,146 @@ test("trackChildProcessIdentity rejects cancelling jobs so spawn path can kill o
       assert.equal(readJobFile(cwd, base.id).phase, "cancelling");
     });
   } finally {
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+/**
+ * Spawn a short-lived child, capture its start-time identity while alive, then kill it.
+ * Used to build a dead-but-once-real process record for stale-job tests.
+ */
+async function spawnDeadChildRecord() {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60_000)"], {
+    stdio: ["ignore", "ignore", "ignore"]
+  });
+  const pid = child.pid;
+  assert.ok(Number.isFinite(pid), "spawned child must have a pid");
+  // Capture start identity while the process is still running.
+  const record = buildProcessRecord(pid);
+  child.kill("SIGKILL");
+  await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", () => resolve());
+  });
+  return { pid: record.pid, processStartTime: record.processStartTime ?? null };
+}
+
+test("refreshStaleActiveJobs does not stale-mark when child is dead but companion is live", async () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    const deadChild = await spawnDeadChildRecord();
+    const companion = currentProcessRecord();
+    const job = {
+      id: "stale-race-live-companion",
+      status: "running",
+      phase: "running",
+      mode: "analyze",
+      pid: deadChild.pid,
+      processStartTime: deadChild.processStartTime,
+      processGroup: true,
+      companionPid: companion.pid,
+      companionProcessStartTime: companion.processStartTime
+    };
+    writeJobFile(cwd, job.id, job);
+    upsertJob(cwd, job);
+
+    refreshStaleActiveJobs(cwd);
+
+    const stored = readJobFile(cwd, job.id);
+    assert.equal(stored.status, "running", "live companion must prevent failed/stale-process discard");
+    assert.notEqual(stored.phase, "stale-process");
+    assert.equal(stored.pid, deadChild.pid);
+    assert.equal(listJobs(cwd).find((entry) => entry.id === job.id).status, "running");
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("refreshStaleActiveJobs marks stale when both child and companion are dead", async () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    const deadChild = await spawnDeadChildRecord();
+    const deadCompanion = await spawnDeadChildRecord();
+    assert.notEqual(deadChild.pid, deadCompanion.pid);
+    const job = {
+      id: "stale-both-dead",
+      status: "running",
+      phase: "running",
+      mode: "analyze",
+      pid: deadChild.pid,
+      processStartTime: deadChild.processStartTime,
+      processGroup: true,
+      companionPid: deadCompanion.pid,
+      companionProcessStartTime: deadCompanion.processStartTime
+    };
+    writeJobFile(cwd, job.id, job);
+    upsertJob(cwd, job);
+
+    refreshStaleActiveJobs(cwd);
+
+    const stored = readJobFile(cwd, job.id);
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.phase, "stale-process");
+    assert.equal(stored.pid, null);
+    assert.equal(stored.companionPid, null);
+    assert.equal(stored.companionProcessStartTime, null);
+    assert.match(String(stored.result?.error ?? ""), /stale/i);
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("refreshStaleActiveJobs still stale-marks background jobs with dead pid (no companion)", async () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    const deadChild = await spawnDeadChildRecord();
+    const job = {
+      id: "stale-background-no-companion",
+      status: "running",
+      phase: "background",
+      mode: "analyze",
+      pid: deadChild.pid,
+      processStartTime: deadChild.processStartTime,
+      processGroup: true
+      // no companionPid — background / self-tracked job
+    };
+    writeJobFile(cwd, job.id, job);
+    upsertJob(cwd, job);
+
+    refreshStaleActiveJobs(cwd);
+
+    const stored = readJobFile(cwd, job.id);
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.phase, "stale-process");
+    assert.equal(stored.pid, null);
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
     cleanupDir(dataDir);
     cleanupDir(cwd);
   }

@@ -14,13 +14,22 @@ function staleJobPayload(job, verification) {
     status: "failed",
     phase: "stale-process",
     pid: null,
+    companionPid: null,
+    companionProcessStartTime: null,
     completedAt: nowIso(),
     result: { error: `Recorded process is stale: ${verification.reason}` },
     processVerification: verification
   };
 }
 
-function refreshStaleActiveJobs(cwd) {
+/**
+ * Mark active jobs whose recorded process identity is gone as failed/stale-process.
+ * Foreground managed jobs (finite companionPid) skip stale-marking while the
+ * companion is still alive so concurrent status cannot discard a pending runner commit.
+ * Exported for tests.
+ */
+export function refreshStaleActiveJobs(cwd) {
+  const allowUnverified = process.platform === "win32";
   for (const job of listJobs(cwd)) {
     if (!isActiveJobStatus(job.status) || !Number.isFinite(job.pid)) {
       continue;
@@ -30,10 +39,20 @@ function refreshStaleActiveJobs(cwd) {
     }
     const verification = verifyProcessRecord(
       { pid: job.pid, processStartTime: job.processStartTime ?? null },
-      { allowUnverified: process.platform === "win32" }
+      { allowUnverified }
     );
     if (verification.matches || verification.reason === "unverifiable") {
       continue;
+    }
+    // Live companion still owns the terminal commit; do not race it to failed/stale.
+    if (Number.isFinite(job.companionPid)) {
+      const companionVerification = verifyProcessRecord(
+        { pid: job.companionPid, processStartTime: job.companionProcessStartTime ?? null },
+        { allowUnverified }
+      );
+      if (companionVerification.matches || companionVerification.reason === "unverifiable") {
+        continue;
+      }
     }
     transitionJob(cwd, job.id, (current) => {
       if (!current || !isActiveJobStatus(current.status) || isCancelInProgress(current) || current.status === "cancelled") {
@@ -42,10 +61,28 @@ function refreshStaleActiveJobs(cwd) {
       if (!Number.isFinite(current.pid)) {
         return { apply: false, reason: "no-pid", job: current };
       }
+      // Re-check identities under the lock so a pre-lock snapshot cannot stale-mark
+      // a job whose child/companion record changed (runner commit, re-track, etc.).
+      const currentVerification = verifyProcessRecord(
+        { pid: current.pid, processStartTime: current.processStartTime ?? null },
+        { allowUnverified }
+      );
+      if (currentVerification.matches || currentVerification.reason === "unverifiable") {
+        return { apply: false, reason: "process-live", job: current };
+      }
+      if (Number.isFinite(current.companionPid)) {
+        const companionVerification = verifyProcessRecord(
+          { pid: current.companionPid, processStartTime: current.companionProcessStartTime ?? null },
+          { allowUnverified }
+        );
+        if (companionVerification.matches || companionVerification.reason === "unverifiable") {
+          return { apply: false, reason: "companion-live", job: current };
+        }
+      }
       return {
         apply: true,
         reason: "mark-stale",
-        job: staleJobPayload(current, verification)
+        job: staleJobPayload(current, currentVerification)
       };
     });
   }

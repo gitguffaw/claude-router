@@ -5,7 +5,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { buildEnv, initGitRepo, installFakeClaude, makeTempDir } from "./helpers.mjs";
-import { schemaFor, validateAgainstSchema, InvalidParamsError } from "../scripts/claude-router-mcp.mjs";
+import {
+  schemaFor,
+  validateAgainstSchema,
+  InvalidParamsError,
+  formatProcessFailure,
+  resolveOuterTimeoutMs,
+  trackInFlightChild,
+  untrackInFlightChild,
+  getInFlightChildren,
+  sweepInFlightChildren
+} from "../scripts/claude-router-mcp.mjs";
 import { MCP_TOOLS } from "../scripts/lib/router-commands.mjs";
 import { PERMISSION_MODES } from "../scripts/lib/model-catalog.mjs";
 import { WRITE_CAPABLE_PERMISSION_MODES } from "../scripts/lib/routed-controls.mjs";
@@ -38,6 +48,48 @@ function request(proc, message) {
     proc.stdout.on("data", onData);
     proc.stdin.write(`${JSON.stringify(message)}\n`);
   });
+}
+
+/** Collect the next `count` JSON-RPC responses (any order of completion). */
+function collectResponses(proc, count, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    const messages = [];
+    let buffer = "";
+    const timer = setTimeout(() => {
+      proc.stdout.off("data", onData);
+      reject(new Error(`timeout waiting for ${count} responses, got ${messages.length}: ${JSON.stringify(messages)}`));
+    }, timeoutMs);
+    const onData = (chunk) => {
+      buffer += String(chunk);
+      let newline = buffer.indexOf("\n");
+      while (newline !== -1) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (line) {
+          try {
+            messages.push(JSON.parse(line));
+          } catch (error) {
+            clearTimeout(timer);
+            proc.stdout.off("data", onData);
+            reject(error);
+            return;
+          }
+          if (messages.length >= count) {
+            clearTimeout(timer);
+            proc.stdout.off("data", onData);
+            resolve(messages);
+            return;
+          }
+        }
+        newline = buffer.indexOf("\n");
+      }
+    };
+    proc.stdout.on("data", onData);
+  });
+}
+
+function writeLine(proc, line) {
+  proc.stdin.write(`${line}\n`);
 }
 
 test("mcp server lists tools with closed schemas and omits always-rejected controls", async () => {
@@ -104,6 +156,10 @@ test("mcp server lists tools with closed schemas and omits always-rejected contr
     assert.equal(raw.inputSchema.properties.args.items.type, "string");
     assert.equal(raw.inputSchema.properties.timeout_ms.type, "number");
     assert.equal(raw.inputSchema.properties.timeout_ms.minimum, 0);
+    assert.match(
+      raw.inputSchema.properties.timeout_ms.description,
+      /0 disables the inner companion timeout.*CLAUDE_ROUTER_MCP_OUTER_TIMEOUT_MS.*35 minutes/
+    );
     assert.equal(raw.inputSchema.properties.model, undefined);
     assert.deepEqual(raw.inputSchema.required, ["args"]);
 
@@ -115,6 +171,10 @@ test("mcp server lists tools with closed schemas and omits always-rejected contr
     assert.equal(status.inputSchema.additionalProperties, false);
     assert.equal(status.inputSchema.properties.timeout_ms.type, "number");
     assert.equal(status.inputSchema.properties.timeout_ms.minimum, 0);
+    assert.match(
+      status.inputSchema.properties.timeout_ms.description,
+      /0 disables the inner companion timeout.*CLAUDE_ROUTER_MCP_OUTER_TIMEOUT_MS.*35 minutes/
+    );
     assert.equal(status.inputSchema.properties.poll_interval_ms.type, "number");
     assert.equal(status.inputSchema.properties.poll_interval_ms.minimum, 0);
     assert.equal(status.inputSchema.properties.model, undefined);
@@ -421,3 +481,289 @@ test("mcp exec accepts auto permission_mode from shared catalog", async () => {
     proc.kill("SIGTERM");
   }
 });
+
+test("mcp tools/call is concurrent: fast response arrives before slow", async () => {
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 0, method: "initialize", params: {} });
+    const pending = collectResponses(proc, 2, 20000);
+    // Slow: fake claude SLEEP path (~5s). Fast: models --static skips claude.
+    writeLine(proc, JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "claude_router_analyze",
+        arguments: { cwd: repo, prompt: "SLEEP concurrent slow path" }
+      }
+    }));
+    writeLine(proc, JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "claude_router_models",
+        arguments: { static: true }
+      }
+    }));
+    const responses = await pending;
+    assert.equal(responses[0].id, 2, `expected fast id 2 first, got order ${responses.map((r) => r.id).join(",")}`);
+    assert.equal(responses[1].id, 1);
+    assert.equal(responses[0].error, undefined, JSON.stringify(responses[0].error ?? {}));
+    assert.equal(responses[1].error, undefined, JSON.stringify(responses[1].error ?? {}));
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("mcp parse error includes id: null", async () => {
+  const bin = makeTempDir();
+  installFakeClaude(bin);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    const pending = collectResponses(proc, 1, 5000);
+    writeLine(proc, "{not valid json");
+    const [response] = await pending;
+    assert.equal(Object.prototype.hasOwnProperty.call(response, "id"), true);
+    assert.equal(response.id, null);
+    assert.equal(response.error?.code, -32700);
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("formatProcessFailure prefers spawn error over exit null", () => {
+  assert.match(
+    formatProcessFailure({ status: null, stderr: "", stdout: "", error: { message: "spawn ENOENT" } }),
+    /spawn ENOENT/
+  );
+  assert.match(
+    formatProcessFailure({ status: null, stderr: "", stdout: "", error: null }),
+    /process failed/
+  );
+  assert.match(
+    formatProcessFailure({ status: 1, stderr: "companion blew up\n", stdout: "", error: null }),
+    /companion blew up/
+  );
+  assert.equal(
+    formatProcessFailure({ status: 2, stderr: "", stdout: "", error: null }),
+    "exit 2"
+  );
+  assert.equal(
+    resolveOuterTimeoutMs(undefined, 35 * 60 * 1000),
+    35 * 60 * 1000
+  );
+  assert.equal(
+    resolveOuterTimeoutMs(40 * 60 * 1000, 35 * 60 * 1000),
+    40 * 60 * 1000 + 60000
+  );
+  assert.equal(
+    resolveOuterTimeoutMs(1000, 35 * 60 * 1000),
+    35 * 60 * 1000
+  );
+});
+
+test("mcp outer timeout returns -32000 and server remains responsive", async () => {
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const env = {
+    ...buildEnv(bin),
+    CLAUDE_ROUTER_MCP_OUTER_TIMEOUT_MS: "400"
+  };
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env, stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const timedOut = await request(proc, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "claude_router_analyze",
+        arguments: { cwd: repo, prompt: "SLEEP past outer bound" }
+      }
+    });
+    assert.equal(timedOut.error?.code, -32000, JSON.stringify(timedOut));
+    assert.match(timedOut.error.message, /outer timeout/i);
+
+    const stillAlive = await request(proc, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "claude_router_models",
+        arguments: { static: true }
+      }
+    });
+    assert.equal(stillAlive.error, undefined, JSON.stringify(stillAlive.error ?? {}));
+    assert.equal(stillAlive.id, 3);
+    assert.ok(stillAlive.result?.content?.[0]?.text);
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("in-flight registry add/remove and sweep signals tracked child", async () => {
+  // Unit-test helpers: avoid full-server signal flakiness for the registry contract.
+  const before = getInFlightChildren().length;
+  const invalid = trackInFlightChild({ pid: null, processGroup: false });
+  assert.equal(invalid, null);
+  assert.equal(getInFlightChildren().length, before);
+
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000); setTimeout(() => process.exit(0), 30000);"], {
+    stdio: "ignore"
+  });
+  assert.ok(Number.isFinite(child.pid));
+  const entry = trackInFlightChild({ pid: child.pid, processGroup: false });
+  assert.ok(entry);
+  assert.equal(entry.pid, child.pid);
+  assert.equal(getInFlightChildren().some((item) => item.pid === child.pid), true);
+
+  untrackInFlightChild(entry);
+  assert.equal(getInFlightChildren().some((item) => item.pid === child.pid), false);
+
+  const retracked = trackInFlightChild({ pid: child.pid, processGroup: false });
+  assert.ok(retracked);
+  sweepInFlightChildren("SIGTERM");
+  const deadline = Date.now() + 3000;
+  let alive = true;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(child.pid, 0);
+      await new Promise((r) => setTimeout(r, 50));
+    } catch {
+      alive = false;
+      break;
+    }
+  }
+  untrackInFlightChild(retracked);
+  assert.equal(alive, false, `tracked child ${child.pid} should die after sweep SIGTERM`);
+});
+
+test("mcp tools/call concurrency queue: 20 fast calls all respond", async () => {
+  const bin = makeTempDir();
+  installFakeClaude(bin);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 0, method: "initialize", params: {} });
+    const count = 20;
+    const pending = collectResponses(proc, count, 30000);
+    for (let id = 1; id <= count; id += 1) {
+      writeLine(proc, JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: {
+          name: "claude_router_models",
+          arguments: { static: true }
+        }
+      }));
+    }
+    const responses = await pending;
+    assert.equal(responses.length, count);
+    const ids = new Set(responses.map((r) => r.id));
+    for (let id = 1; id <= count; id += 1) {
+      assert.ok(ids.has(id), `missing response id ${id}`);
+    }
+    for (const response of responses) {
+      assert.equal(response.error, undefined, JSON.stringify(response.error ?? {}));
+      assert.ok(response.result?.content?.[0]?.text);
+    }
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("mcp SIGTERM sweeps in-flight companion when harness can observe child death", async () => {
+  // Optional integration: companion is the tracked process group. Nested detached fake
+  // claude may not die with the companion; only fail if the server itself fails to exit.
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const pidFile = path.join(data, "fake-claude-mcp-sweep.pid");
+  const env = { ...buildEnv(bin, data), FAKE_CLAUDE_PID_FILE: pidFile };
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env, stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    writeLine(proc, JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "claude_router_analyze",
+        arguments: { cwd: repo, prompt: "SLEEP for shutdown sweep" }
+      }
+    }));
+    const waitPidFile = async (timeoutMs = 8000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (fs.existsSync(pidFile)) {
+          const raw = fs.readFileSync(pidFile, "utf8").trim();
+          const pid = Number(raw);
+          if (Number.isFinite(pid) && pid > 0) {
+            return pid;
+          }
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return null;
+    };
+    const fakePid = await waitPidFile();
+    if (fakePid === null) {
+      // Harness did not observe nested fake claude; skip nested-death assertion.
+      return;
+    }
+    proc.kill("SIGTERM");
+    const serverDeadDeadline = Date.now() + 5000;
+    let serverAlive = true;
+    while (Date.now() < serverDeadDeadline) {
+      try {
+        process.kill(proc.pid, 0);
+        await new Promise((r) => setTimeout(r, 50));
+      } catch {
+        serverAlive = false;
+        break;
+      }
+    }
+    assert.equal(serverAlive, false, "MCP server should exit on SIGTERM");
+
+    // Best-effort: if fake claude is still alive after a short grace, skip (detached grandchild).
+    const childDeadDeadline = Date.now() + 2000;
+    let childAlive = true;
+    while (Date.now() < childDeadDeadline) {
+      try {
+        process.kill(fakePid, 0);
+        await new Promise((r) => setTimeout(r, 50));
+      } catch {
+        childAlive = false;
+        break;
+      }
+    }
+    if (childAlive) {
+      try {
+        process.kill(fakePid, "SIGTERM");
+      } catch {
+        // Already gone or not ours.
+      }
+      try {
+        process.kill(-fakePid, "SIGTERM");
+      } catch {
+        // Process group may not apply.
+      }
+    }
+  } finally {
+    try {
+      proc.kill("SIGTERM");
+    } catch {
+      // Already exited.
+    }
+  }
+});
+

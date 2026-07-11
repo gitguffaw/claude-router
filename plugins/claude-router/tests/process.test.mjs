@@ -363,3 +363,57 @@ test("runProcess does not kill a fast child when timeoutMs exceeds setTimeout ma
   assert.equal(result.status, 0);
   assert.match(result.stdout, /ok/);
 });
+
+test("runProcess kills child when output exceeds maxOutputBytes and sets outputTruncated", async () => {
+  const cap = 8 * 1024;
+  const started = Date.now();
+  const settleRace = Promise.race([
+    runProcess(
+      process.execPath,
+      [
+        "-e",
+        [
+          // Emit past the cap then keep writing so the process would hang without a kill.
+          `process.stdout.write("x".repeat(${cap + 1}));`,
+          "setInterval(() => { process.stdout.write('y'.repeat(1024)); }, 20);",
+          "setTimeout(() => process.exit(0), 60000);"
+        ].join("")
+      ],
+      {
+        maxOutputBytes: cap,
+        stopGraceMs: 50,
+        hardTimeoutMs: 1000,
+        pollIntervalMs: 25,
+        timeoutMs: 15000
+      }
+    ),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("runProcess hung after maxOutputBytes exceed")), 10000);
+    })
+  ]);
+
+  const result = await settleRace;
+  const elapsedMs = Date.now() - started;
+
+  assert.equal(result.outputTruncated, true);
+  assert.equal(result.timedOut, false);
+  assert.ok(
+    result.stdout.length + result.stderr.length > cap,
+    `expected captured output over cap, got ${result.stdout.length + result.stderr.length}`
+  );
+  assert.ok(elapsedMs < 8000, `expected prompt settle after output cap, took ${elapsedMs}ms`);
+  if (Number.isFinite(result.pid)) {
+    assert.equal(processAlive(result.pid), false, `child ${result.pid} should be dead after output cap kill`);
+  }
+});
+
+test("runProcess leaves outputTruncated false when maxOutputBytes is unset", async () => {
+  const result = await runProcess(
+    process.execPath,
+    ["-e", "process.stdout.write('hello'); process.exit(0);"],
+    { timeoutMs: 5000 }
+  );
+  assert.equal(result.outputTruncated, false);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /hello/);
+});

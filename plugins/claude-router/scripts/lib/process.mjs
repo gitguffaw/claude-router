@@ -160,6 +160,7 @@ export function runProcess(command, args = [], options = {}) {
   return new Promise((resolve) => {
     let settled = false;
     let timedOut = false;
+    let outputTruncated = false;
     let trackingShutdownActive = false;
     let streamDrainTimeout = null;
     const detached = options.detached ?? process.platform !== "win32";
@@ -179,14 +180,21 @@ export function runProcess(command, args = [], options = {}) {
     const MAX_TIMEOUT_MS = 2147483647;
     const rawTimeoutMs = Number(options.timeoutMs) || 0;
     const timeoutMs = rawTimeoutMs > 0 ? Math.min(rawTimeoutMs, MAX_TIMEOUT_MS) : 0;
-    const timeout = timeoutMs > 0 ? setTimeout(() => {
-      timedOut = true;
+    const rawMaxOutputBytes = Number(options.maxOutputBytes);
+    const maxOutputBytes = Number.isFinite(rawMaxOutputBytes) && rawMaxOutputBytes > 0
+      ? Math.floor(rawMaxOutputBytes)
+      : undefined;
+    const killChildTree = () => {
       void terminateProcessTree(processRecord, {
         stopGraceMs: options.stopGraceMs ?? 1000,
         hardTimeoutMs: options.hardTimeoutMs ?? 5000,
         pollIntervalMs: options.pollIntervalMs ?? 100,
         allowUnverified: true
       });
+    };
+    const timeout = timeoutMs > 0 ? setTimeout(() => {
+      timedOut = true;
+      killChildTree();
     }, timeoutMs) : null;
     // Descendants inheriting stdio can keep "close" from firing after "exit"; bound the wait.
     const rawStreamDrainMs = Number(options.streamDrainTimeoutMs);
@@ -205,7 +213,7 @@ export function runProcess(command, args = [], options = {}) {
         clearTimeout(streamDrainTimeout);
         streamDrainTimeout = null;
       }
-      resolve({ ...payload, timedOut, trackingFailed: Boolean(trackingError), trackingError });
+      resolve({ ...payload, timedOut, outputTruncated, trackingFailed: Boolean(trackingError), trackingError });
     };
     try {
       options.onSpawn?.(processRecord);
@@ -293,6 +301,7 @@ export function runProcess(command, args = [], options = {}) {
           processStartTime: processRecord.processStartTime,
           processGroup: processRecord.processGroup,
           timedOut: false,
+          outputTruncated: false,
           trackingFailed: true,
           trackingError: error,
           processGone: true,
@@ -302,15 +311,32 @@ export function runProcess(command, args = [], options = {}) {
     }
     let stdout = "";
     let stderr = "";
+    const checkOutputCap = () => {
+      if (outputTruncated || settled || trackingShutdownActive || maxOutputBytes === undefined) {
+        return;
+      }
+      if (stdout.length + stderr.length > maxOutputBytes) {
+        outputTruncated = true;
+        killChildTree();
+      }
+    };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
+      if (outputTruncated) {
+        return;
+      }
       stdout += chunk;
       options.onStdout?.(chunk);
+      checkOutputCap();
     });
     child.stderr.on("data", (chunk) => {
+      if (outputTruncated) {
+        return;
+      }
       stderr += chunk;
       options.onStderr?.(chunk);
+      checkOutputCap();
     });
     child.on("error", (error) => {
       finish({

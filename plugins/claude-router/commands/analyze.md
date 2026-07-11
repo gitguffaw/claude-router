@@ -20,7 +20,7 @@ Core constraints:
 Run:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" analyze "$ARGUMENTS"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" analyze --raw-arg-string "$ARGUMENTS"
 ```
 
 Return the command stdout verbatim, exactly as-is.

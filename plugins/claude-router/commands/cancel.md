@@ -5,4 +5,4 @@ disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" cancel "$ARGUMENTS"`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" cancel --raw-arg-string "$ARGUMENTS"`

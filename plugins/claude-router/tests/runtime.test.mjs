@@ -427,6 +427,88 @@ test("routed parser preserves repeatable values, inline equals, and bare optiona
   assert.match(payload.request.userRequest, /inspect parser/);
 });
 
+test("direct single-argument prompt is not retokenized (argv-ingress)", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  const env = buildEnv(bin, data);
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  // True single post-command argv token: pre-fix this retokenized --cwd out of the prompt.
+  const prompt = "explain why --cwd /nonexistent is dangerous";
+  const result = run("node", [SCRIPT, "analyze", prompt], { cwd: repo, env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /--cwd \/nonexistent/);
+
+  const status = run("node", [SCRIPT, "status", "--json"], { cwd: repo, env });
+  assert.equal(status.status, 0, status.stderr);
+  const statusPayload = JSON.parse(status.stdout);
+  assert.ok(statusPayload.jobs?.length >= 1, "job should be stored under the real workspace, not --cwd");
+  const job = run("node", [SCRIPT, "result", "--json", statusPayload.jobs[0].id], { cwd: repo, env });
+  assert.equal(job.status, 0, job.stderr);
+  const payload = JSON.parse(job.stdout);
+  assert.equal(payload.request.userRequest, prompt);
+  assert.equal(fs.realpathSync(payload.workspaceRoot), fs.realpathSync(repo));
+  assert.notEqual(payload.workspaceRoot, path.resolve("/nonexistent"));
+});
+
+test("--raw-arg-string retokenizes slash-command blob into options and prompt", async () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  // Marker must be the first post-command token (slash-command opt-in path).
+  // --json inside the blob drives JSON output parsing for the assertions below.
+  const raw = "--json --model sonnet do the thing";
+  const result = run("node", [SCRIPT, "analyze", "--raw-arg-string", raw], {
+    cwd: repo,
+    env: buildEnv(bin, data)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.request.controls.model, "sonnet");
+  assert.equal(payload.request.userRequest, "do the thing");
+  // Pin equivalence with splitRawArgumentString tokenization of the same blob.
+  const { splitRawArgumentString } = await import("../scripts/lib/args.mjs");
+  assert.deepEqual(splitRawArgumentString(raw), ["--json", "--model", "sonnet", "do", "the", "thing"]);
+});
+
+test("--raw-arg-string empty slash-command blob matches no-arg invocation", async () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  const env = buildEnv(bin, data);
+  // Empty $ARGUMENTS from slash commands: marker path must not error; "" -> [].
+  const bare = run("node", [SCRIPT, "version"], { cwd: ROOT, env });
+  const emptyBlob = run("node", [SCRIPT, "version", "--raw-arg-string", ""], { cwd: ROOT, env });
+  assert.equal(emptyBlob.status, 0, emptyBlob.stderr);
+  assert.equal(emptyBlob.status, bare.status);
+  assert.equal(emptyBlob.stdout, bare.stdout);
+  assert.equal(emptyBlob.stderr, bare.stderr);
+  const { splitRawArgumentString } = await import("../scripts/lib/args.mjs");
+  assert.deepEqual(splitRawArgumentString(""), []);
+});
+
+test("--raw-arg-string rejects malformed marker usage", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  const missing = run("node", [SCRIPT, "analyze", "--raw-arg-string"], {
+    cwd: ROOT,
+    env: buildEnv(bin, data)
+  });
+  assert.notEqual(missing.status, 0);
+  assert.match(missing.stderr, /--raw-arg-string requires exactly one following token/);
+
+  const extra = run("node", [SCRIPT, "analyze", "--raw-arg-string", "one", "two"], {
+    cwd: ROOT,
+    env: buildEnv(bin, data)
+  });
+  assert.notEqual(extra.status, 0);
+  assert.match(extra.stderr, /--raw-arg-string requires exactly one following token/);
+});
+
 test("analyze stores completed job and context pack", () => {
   const repo = makeTempDir();
   const bin = makeTempDir();

@@ -5,7 +5,7 @@ disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" models "$ARGUMENTS"`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" models --raw-arg-string "$ARGUMENTS"`
 
 Present the full model catalog output to the user. Preserve:
 - live discovery status and Claude CLI version

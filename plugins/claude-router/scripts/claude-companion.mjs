@@ -23,10 +23,15 @@ const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8")).version;
 
 function normalizeArgv(argv) {
-  if (argv.length === 1) {
-    return splitRawArgumentString(argv[0]);
+  if (argv[0] !== "--raw-arg-string") {
+    return argv;
   }
-  return argv;
+  if (argv.length !== 2) {
+    throw new Error(
+      "--raw-arg-string requires exactly one following token: the raw argument string"
+    );
+  }
+  return splitRawArgumentString(argv[1]);
 }
 
 function parseCommandInput(argv, config = {}) {

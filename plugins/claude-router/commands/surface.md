@@ -5,6 +5,6 @@ disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" surface "$ARGUMENTS"`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" surface --raw-arg-string "$ARGUMENTS"`
 
 Present the full command output to the user without summarizing it.

@@ -26,7 +26,7 @@ Mutating Claude configuration commands and dangerous permission bypasses are blo
 Run:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" raw "$ARGUMENTS"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" raw --raw-arg-string "$ARGUMENTS"
 ```
 
 Return stdout and stderr verbatim, exactly as-is.

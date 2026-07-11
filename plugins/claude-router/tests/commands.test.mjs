@@ -59,7 +59,7 @@ test("deterministic command files invoke the shared companion runtime", () => {
   ]) {
     const source = read(path.join("commands", file));
     assert.match(source, /disable-model-invocation:\s*true/);
-    assert.match(source, new RegExp(`claude-companion\\.mjs" ${command}`));
+    assert.match(source, new RegExp(`claude-companion\\.mjs" ${command} --raw-arg-string "\\\$ARGUMENTS"`));
   }
 
   const status = read("commands/status.md");
@@ -73,16 +73,16 @@ test("routed command files preserve mode boundaries", () => {
   const review = read("commands/review.md");
   const adversarial = read("commands/adversarial-review.md");
 
-  assert.match(analyze, /claude-companion\.mjs" analyze "\$ARGUMENTS"/);
+  assert.match(analyze, /claude-companion\.mjs" analyze --raw-arg-string "\$ARGUMENTS"/);
   assert.match(analyze, /read-only/i);
   assert.match(analyze, /does not expose a generic native web-search mode/i);
-  assert.match(plan, /claude-companion\.mjs" plan "\$ARGUMENTS"/);
+  assert.match(plan, /claude-companion\.mjs" plan --raw-arg-string "\$ARGUMENTS"/);
   assert.match(plan, /read-only/i);
-  assert.match(exec, /claude-companion\.mjs" exec "\$ARGUMENTS"/);
+  assert.match(exec, /claude-companion\.mjs" exec --raw-arg-string "\$ARGUMENTS"/);
   assert.match(exec, /write-capable/i);
-  assert.match(review, /claude-companion\.mjs" review "\$ARGUMENTS"/);
+  assert.match(review, /claude-companion\.mjs" review --raw-arg-string "\$ARGUMENTS"/);
   assert.match(review, /review-only/i);
-  assert.match(adversarial, /claude-companion\.mjs" adversarial-review "\$ARGUMENTS"/);
+  assert.match(adversarial, /claude-companion\.mjs" adversarial-review --raw-arg-string "\$ARGUMENTS"/);
   assert.match(adversarial, /challenges implementation approach/i);
 });
 
@@ -90,12 +90,12 @@ test("raw and cli commands expose guarded Claude CLI passthrough", () => {
   const raw = read("commands/raw.md");
   const cli = read("commands/cli.md");
 
-  assert.match(raw, /claude-companion\.mjs" raw "\$ARGUMENTS"/);
+  assert.match(raw, /claude-companion\.mjs" raw --raw-arg-string "\$ARGUMENTS"/);
   assert.match(raw, /mcp list/);
   assert.match(raw, /plugin list/);
   assert.match(raw, /Mutating Claude configuration commands and dangerous permission bypasses are blocked by default/i);
   assert.match(cli, /alias for `\/claude-router:raw`/i);
-  assert.match(cli, /claude-companion\.mjs" raw "\$ARGUMENTS"/);
+  assert.match(cli, /claude-companion\.mjs" raw --raw-arg-string "\$ARGUMENTS"/);
 });
 
 test("Claude Code plugin manifests align with package metadata", () => {

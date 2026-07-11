@@ -5,6 +5,6 @@ disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" status "$ARGUMENTS"`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/claude-companion.mjs" status --raw-arg-string "$ARGUMENTS"`
 
 If the user did not pass a job ID, keep the output compact and preserve the job table fields. If the user did pass a job ID, present the full command output.

@@ -7,11 +7,16 @@ import { fileURLToPath } from "node:url";
 import { makeTempDir } from "./helpers.mjs";
 import { buildProcessRecord, currentProcessRecord } from "../scripts/lib/process.mjs";
 import {
+  ensureStateDir,
   listJobs,
+  loadState,
   readJobFile,
+  readJobRecord,
   resolveJobFile,
   resolveLockFile,
   resolveStateDir,
+  resolveStateFile,
+  saveState,
   transitionJob,
   upsertJob,
   writeJobFile
@@ -91,7 +96,12 @@ process.stdout.write(\`ok:\${id}\`);
 `, "utf8");
 
   try {
-    const env = { ...process.env, CLAUDE_ROUTER_DATA: dataDir };
+    const env = {
+      ...process.env,
+      CLAUDE_ROUTER_DATA: dataDir,
+      // Full-suite parallel load can delay unlucky waiters past the 5s default.
+      CLAUDE_ROUTER_STATE_LOCK_TIMEOUT_MS: "60000"
+    };
     const results = await Promise.all(
       Array.from({ length: processCount }, (_, index) => {
         const id = `job-${String(index).padStart(2, "0")}`;
@@ -1026,6 +1036,154 @@ test("refreshStaleActiveJobs still stale-marks background jobs with dead pid (no
     } else {
       process.env.CLAUDE_ROUTER_DATA = previousDataDir;
     }
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+function listCorruptSidecars(dir) {
+  if (!fs.existsSync(dir)) {
+    return [];
+  }
+  return fs.readdirSync(dir).filter((name) => name.includes(".corrupt-"));
+}
+
+test("corrupt state.json with readable job files reconstructs index and save keeps job files", () => {
+  // Pre-fix: loadState swallowed parse errors as empty state; the next save then
+  // treated previousJobs as [] and deleted every per-job file not in the empty view.
+  // Post-fix: quarantine + rebuild from jobs/, and save retains reconstructed ids.
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  try {
+    withDataDir(dataDir, () => {
+      ensureStateDir(cwd);
+      const jobA = {
+        id: "recover-a",
+        status: "completed",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        mode: "analyze",
+        summary: "a"
+      };
+      const jobB = {
+        id: "recover-b",
+        status: "running",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        mode: "implement",
+        phase: "running"
+      };
+      writeJobFile(cwd, jobA.id, jobA);
+      writeJobFile(cwd, jobB.id, jobB);
+
+      const stateFile = resolveStateFile(cwd);
+      fs.writeFileSync(stateFile, "{ not-json !!\n", { encoding: "utf8", mode: 0o600 });
+      assert.ok(fs.existsSync(stateFile));
+
+      const loaded = loadState(cwd);
+      assert.equal(loaded.version, 1);
+      assert.ok(Array.isArray(loaded.jobs));
+      assert.equal(loaded.jobs.length, 2, "reconstructed index must include readable job files");
+      const byId = new Map(loaded.jobs.map((job) => [job.id, job]));
+      assert.ok(byId.has("recover-a"));
+      assert.ok(byId.has("recover-b"));
+      assert.equal(byId.get("recover-a").status, "completed");
+      assert.equal(byId.get("recover-b").status, "running");
+      assert.equal(byId.get("recover-a").updatedAt, jobA.updatedAt);
+      assert.equal(byId.get("recover-b").updatedAt, jobB.updatedAt);
+
+      assert.ok(!fs.existsSync(stateFile), "corrupt state.json must be quarantined aside");
+      const stateDir = resolveStateDir(cwd);
+      const corruptSidecars = listCorruptSidecars(stateDir).filter((name) => name.startsWith("state.json.corrupt-"));
+      assert.equal(corruptSidecars.length, 1, "expected one state.json.corrupt-* sidecar");
+
+      // Next save must not delete reconstructed jobs' per-job files (pre-fix silent loss).
+      saveState(cwd, loaded);
+      assert.ok(fs.existsSync(resolveJobFile(cwd, "recover-a")), "job file recover-a must survive save");
+      assert.ok(fs.existsSync(resolveJobFile(cwd, "recover-b")), "job file recover-b must survive save");
+      assert.ok(readJobFile(cwd, "recover-a"));
+      assert.ok(readJobFile(cwd, "recover-b"));
+      assert.equal(listJobs(cwd).length, 2);
+    });
+  } finally {
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("corrupt state.json with no job files returns default state and quarantines", () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  try {
+    withDataDir(dataDir, () => {
+      ensureStateDir(cwd);
+      const stateFile = resolveStateFile(cwd);
+      fs.writeFileSync(stateFile, "<<<corrupt>>>", { encoding: "utf8", mode: 0o600 });
+
+      const loaded = loadState(cwd);
+      assert.deepEqual(loaded, { version: 1, config: {}, jobs: [] });
+      assert.ok(!fs.existsSync(stateFile), "corrupt state.json must be renamed aside");
+      const corruptSidecars = listCorruptSidecars(resolveStateDir(cwd)).filter((name) =>
+        name.startsWith("state.json.corrupt-")
+      );
+      assert.equal(corruptSidecars.length, 1);
+    });
+  } finally {
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("corrupt per-job file: readJobFile returns null and quarantines; transitionJob uses index", () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  try {
+    withDataDir(dataDir, () => {
+      const jobId = "corrupt-job-file";
+      const indexJob = {
+        id: jobId,
+        status: "running",
+        phase: "running",
+        mode: "analyze",
+        summary: "from-index"
+      };
+      upsertJob(cwd, indexJob);
+      // Overwrite the job file with garbage after a valid index entry exists.
+      const jobFile = resolveJobFile(cwd, jobId);
+      fs.writeFileSync(jobFile, "{ bad json", { encoding: "utf8", mode: 0o600 });
+
+      assert.equal(readJobFile(cwd, jobId), null, "corrupt job file must not throw");
+      assert.ok(!fs.existsSync(jobFile), "corrupt job file must be quarantined");
+      const jobsDir = path.dirname(jobFile);
+      const corruptSidecars = listCorruptSidecars(jobsDir).filter((name) =>
+        name.startsWith(`${jobId}.json.corrupt-`)
+      );
+      assert.equal(corruptSidecars.length, 1);
+
+      // Index fall-through still works for record reads and transitions.
+      const record = readJobRecord(cwd, jobId);
+      assert.ok(record, "readJobRecord must fall through to index after quarantine");
+      assert.equal(record.id, jobId);
+      assert.equal(record.status, "running");
+
+      const result = transitionJob(cwd, jobId, (current) => {
+        assert.ok(current, "transitionJob must resolve via index when job file is corrupt");
+        assert.equal(current.id, jobId);
+        assert.equal(current.status, "running");
+        return {
+          apply: true,
+          reason: "mark-completed",
+          job: {
+            ...current,
+            status: "completed",
+            phase: "completed"
+          }
+        };
+      });
+      assert.equal(result.applied, true);
+      assert.equal(result.job.status, "completed");
+      assert.equal(readJobFile(cwd, jobId)?.status, "completed");
+      assert.equal(listJobs(cwd).find((job) => job.id === jobId)?.status, "completed");
+    });
+  } finally {
     cleanupDir(dataDir);
     cleanupDir(cwd);
   }

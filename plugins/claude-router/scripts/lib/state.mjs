@@ -62,21 +62,108 @@ export function ensureStateDir(cwd) {
   fs.mkdirSync(resolveJobsDir(cwd), { recursive: true, mode: 0o700 });
 }
 
+/**
+ * Best-effort quarantine: rename corrupt file to `<file>.corrupt-<timestamp>`.
+ * If rename fails, leave the original in place. Returns the quarantine path or null.
+ */
+function quarantineCorruptFile(file) {
+  try {
+    if (!file || !fs.existsSync(file)) {
+      return null;
+    }
+    const dest = `${file}.corrupt-${Date.now()}`;
+    fs.renameSync(file, dest);
+    return dest;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Minimal index rebuild from per-job JSON files (id + status + updatedAt as present).
+ * Unreadable job files are skipped (not quarantined here — readJobFile handles that).
+ * Returns null when no readable job records are found.
+ */
+function reconstructStateFromJobFiles(cwd) {
+  const jobsDir = resolveJobsDir(cwd);
+  let names;
+  try {
+    names = fs.readdirSync(jobsDir);
+  } catch {
+    return null;
+  }
+  const jobs = [];
+  for (const name of names) {
+    // Job files are `<id>.json`. Quarantined names end with `.corrupt-<ts>` and are skipped.
+    if (!name.endsWith(".json")) {
+      continue;
+    }
+    const file = path.join(jobsDir, name);
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !parsed.id) {
+        continue;
+      }
+      const entry = { id: parsed.id };
+      if (parsed.status !== undefined) {
+        entry.status = parsed.status;
+      }
+      if (parsed.updatedAt !== undefined) {
+        entry.updatedAt = parsed.updatedAt;
+      }
+      jobs.push(entry);
+    } catch {
+      // Leave corrupt per-job files for the job-file read path to quarantine.
+    }
+  }
+  if (jobs.length === 0) {
+    return null;
+  }
+  return { version: STATE_VERSION, config: {}, jobs };
+}
+
+function normalizeState(parsed) {
+  return {
+    ...defaultState(),
+    ...parsed,
+    config: parsed.config ?? {},
+    jobs: Array.isArray(parsed.jobs) ? parsed.jobs : []
+  };
+}
+
+/**
+ * Try to parse a per-job JSON file. On corrupt content: quarantine and return null.
+ * Missing file also returns null. Shared by readJobFile / readJobRecord / transitionJob.
+ */
+function tryReadJobJson(file) {
+  if (!fs.existsSync(file)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    quarantineCorruptFile(file);
+    return null;
+  }
+}
+
 export function loadState(cwd) {
   const file = resolveStateFile(cwd);
   if (!fs.existsSync(file)) {
-    return defaultState();
+    // After a prior quarantine the index file is gone; recover from job files if any.
+    // Fresh workspaces with no state and no jobs still get default empty state.
+    return reconstructStateFromJobFiles(cwd) ?? defaultState();
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return {
-      ...defaultState(),
-      ...parsed,
-      config: parsed.config ?? {},
-      jobs: Array.isArray(parsed.jobs) ? parsed.jobs : []
-    };
+    return normalizeState(parsed);
   } catch {
-    return defaultState();
+    // Fail-safe: never treat a corrupt index as empty (that permanently deletes job
+    // files on the next save via saveStateUnlocked cleanup). Quarantine the corrupt
+    // index, then rebuild a minimal jobs list from readable per-job files when present.
+    // If nothing is recoverable, return default empty state (nothing to lose).
+    quarantineCorruptFile(file);
+    return reconstructStateFromJobFiles(cwd) ?? defaultState();
   }
 }
 
@@ -338,22 +425,17 @@ export function writeJobFile(cwd, jobId, payload) {
 }
 
 export function readJobFile(cwd, jobId) {
-  const file = resolveJobFile(cwd, jobId);
-  if (!fs.existsSync(file)) {
-    return null;
-  }
-  return JSON.parse(fs.readFileSync(file, "utf8"));
+  // Missing or corrupt per-job JSON both return null (callers treat as missing).
+  // Corrupt files are quarantined once so they are not reparsed forever.
+  return tryReadJobJson(resolveJobFile(cwd, jobId));
 }
 
 function readJobRecordUnlocked(cwd, jobId) {
-  const file = resolveJobFile(cwd, jobId);
-  if (fs.existsSync(file)) {
-    try {
-      return JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
-      // Fall through to index.
-    }
+  const fileJob = tryReadJobJson(resolveJobFile(cwd, jobId));
+  if (fileJob) {
+    return fileJob;
   }
+  // Fall through to index copy when the job file is missing or was quarantined.
   return loadState(cwd).jobs.find((job) => job.id === jobId) ?? null;
 }
 
@@ -372,15 +454,9 @@ export function transitionJob(cwd, jobId, decide) {
     const state = loadState(cwd);
     const index = state.jobs.findIndex((job) => job.id === jobId);
     const indexJob = index >= 0 ? state.jobs[index] : null;
-    let fileJob = null;
     const file = resolveJobFile(cwd, jobId);
-    if (fs.existsSync(file)) {
-      try {
-        fileJob = JSON.parse(fs.readFileSync(file, "utf8"));
-      } catch {
-        fileJob = null;
-      }
-    }
+    // Same quarantine path as readJobFile; fall through to index on corrupt/missing.
+    const fileJob = tryReadJobJson(file);
     const current = fileJob ?? indexJob ?? null;
     const decision = decide(current ? { ...current } : null) ?? { apply: false, reason: "no-decision" };
     if (!decision.apply) {

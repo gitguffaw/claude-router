@@ -186,6 +186,35 @@ test("raw claude command can read help and blocks mutating commands by default",
   assert.match(blockedMcpLogin.stderr, /may mutate/);
 });
 
+test("raw guardrails block top-level rm session deletion unless allow-mutating", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+
+  const help = run("node", [SCRIPT, "raw", "--json", "--", "rm", "--help"], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.equal(help.status, 0, help.stderr);
+
+  for (const command of ["rm", "stop", "respawn"]) {
+    const blocked = run("node", [SCRIPT, "raw", "--json", "--", command, "some-id"], { cwd: ROOT, env: buildEnv(bin, data) });
+    assert.notEqual(blocked.status, 0, `${command} should fail`);
+    assert.match(blocked.stderr, /may mutate/);
+  }
+
+  const allowed = run("node", [
+    SCRIPT,
+    "raw",
+    "--json",
+    "--allow-mutating",
+    "--",
+    "rm",
+    "some-id"
+  ], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.equal(allowed.status, 0, allowed.stderr);
+  const allowedPayload = JSON.parse(allowed.stdout);
+  assert.equal(allowedPayload.classification.mutating, true);
+  assert.deepEqual(allowedPayload.classification.commandPath, ["rm"]);
+});
+
 test("raw guardrails classify command paths after global flags and do not trust literal help args", () => {
   const bin = makeTempDir();
   const data = makeTempDir();

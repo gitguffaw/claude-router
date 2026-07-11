@@ -259,6 +259,7 @@ function rawCommandClassification(args) {
     mutating = [
       first === "auth" && ["login", "logout"].includes(second),
       first === "setup-token",
+      ["rm", "stop", "respawn"].includes(first),
       ["install", "update", "upgrade"].includes(first),
       first === "mcp" && ["add", "add-json", "add-from-claude-desktop", "login", "logout", "remove", "reset-project-choices"].includes(second),
       pluginCommand && ["init", "new", "install", "i", "enable", "disable", "uninstall", "remove", "update", "prune", "autoremove"].includes(second),

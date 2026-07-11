@@ -174,6 +174,25 @@ export function runProcess(command, args = [], options = {}) {
     });
     const processRecord = buildProcessRecord(child.pid ?? Number.NaN, { processGroup: Boolean(detached && process.platform !== "win32") });
     let trackingError = null;
+    // setTimeout clamps delays > 2^31-1 to ~1ms; cap so huge timeouts are not instant kills.
+    // Declare before onSpawn so tracking-failure shutdown never hits TDZ when it runs sync.
+    const MAX_TIMEOUT_MS = 2147483647;
+    const rawTimeoutMs = Number(options.timeoutMs) || 0;
+    const timeoutMs = rawTimeoutMs > 0 ? Math.min(rawTimeoutMs, MAX_TIMEOUT_MS) : 0;
+    const timeout = timeoutMs > 0 ? setTimeout(() => {
+      timedOut = true;
+      void terminateProcessTree(processRecord, {
+        stopGraceMs: options.stopGraceMs ?? 1000,
+        hardTimeoutMs: options.hardTimeoutMs ?? 5000,
+        pollIntervalMs: options.pollIntervalMs ?? 100,
+        allowUnverified: true
+      });
+    }, timeoutMs) : null;
+    // Descendants inheriting stdio can keep "close" from firing after "exit"; bound the wait.
+    const rawStreamDrainMs = Number(options.streamDrainTimeoutMs);
+    const streamDrainMs = Number.isFinite(rawStreamDrainMs) && rawStreamDrainMs >= 0
+      ? Math.min(rawStreamDrainMs, MAX_TIMEOUT_MS)
+      : 2000;
     const finish = (payload) => {
       if (settled || trackingShutdownActive) {
         return;
@@ -281,24 +300,6 @@ export function runProcess(command, args = [], options = {}) {
         });
       })();
     }
-    // setTimeout clamps delays > 2^31-1 to ~1ms; cap so huge timeouts are not instant kills.
-    const MAX_TIMEOUT_MS = 2147483647;
-    const rawTimeoutMs = Number(options.timeoutMs) || 0;
-    const timeoutMs = rawTimeoutMs > 0 ? Math.min(rawTimeoutMs, MAX_TIMEOUT_MS) : 0;
-    const timeout = timeoutMs > 0 ? setTimeout(() => {
-      timedOut = true;
-      void terminateProcessTree(processRecord, {
-        stopGraceMs: options.stopGraceMs ?? 1000,
-        hardTimeoutMs: options.hardTimeoutMs ?? 5000,
-        pollIntervalMs: options.pollIntervalMs ?? 100,
-        allowUnverified: true
-      });
-    }, timeoutMs) : null;
-    // Descendants inheriting stdio can keep "close" from firing after "exit"; bound the wait.
-    const rawStreamDrainMs = Number(options.streamDrainTimeoutMs);
-    const streamDrainMs = Number.isFinite(rawStreamDrainMs) && rawStreamDrainMs >= 0
-      ? Math.min(rawStreamDrainMs, MAX_TIMEOUT_MS)
-      : 2000;
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");

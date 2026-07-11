@@ -179,6 +179,30 @@ test("runProcess resolves tracking failure only after child is gone", async () =
   assert.equal(processAlive(result.pid), false, `child ${result.pid} should already be dead at resolve`);
 });
 
+test("runProcess settles tracking failure when child already gone (no TDZ hang)", async () => {
+  // Repro: onSpawn throws after spawn; verification is non-matching and isProcessAlive is false,
+  // so the tracking-failure IIFE never awaits. Pre-fix, that path clears `timeout` while still
+  // in TDZ → unhandled rejection → runProcess never settles.
+  const settleRace = Promise.race([
+    runProcess(process.execPath, ["-e", ""], {
+      runCommandImpl: noStartTimeCommand,
+      isProcessAliveImpl: () => false,
+      onSpawn: () => {
+        throw new Error("tracking write failed");
+      }
+    }),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("runProcess hung: tracking-failure path did not settle within 5s")), 5000);
+    })
+  ]);
+
+  const result = await settleRace;
+  assert.equal(result.trackingFailed, true);
+  assert.match(String(result.trackingError?.message ?? result.error?.message ?? ""), /tracking write failed/);
+  assert.equal(result.status, 1);
+  assert.equal(result.processGone, true);
+});
+
 test("runProcess keeps retrying tracking-failure termination until process is gone", async () => {
   let attempts = 0;
   const realKill = process.kill.bind(process);

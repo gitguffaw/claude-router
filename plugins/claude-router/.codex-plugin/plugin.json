@@ -1,6 +1,6 @@
 {
   "name": "claude-router",
-  "version": "2.2.4",
+  "version": "2.3.0",
   "description": "Route host-agent work through the local Claude CLI with policy-backed modes, job tracking, and result handling.",
   "author": {
     "name": "Compound"

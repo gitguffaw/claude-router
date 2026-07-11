@@ -1,6 +1,6 @@
 {
   "name": "@compound/claude-router-marketplace",
-  "version": "2.2.4",
+  "version": "2.3.0",
   "private": true,
   "type": "module",
   "description": "Claude Router marketplace for policy-backed Claude CLI delegation across Codex, Claude Code, and AGY.",

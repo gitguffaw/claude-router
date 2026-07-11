@@ -2,6 +2,23 @@
 
 All notable changes to Claude Router are documented here.
 
+## [2.3.0] — 2026-07-11
+
+### Added
+
+- Workspace state lock (`state.lock`) serializing all state mutations across concurrent companion and MCP processes, with stale-lock recovery keyed to holder process identity and env-tunable timeouts (`CLAUDE_ROUTER_STATE_LOCK_TIMEOUT_MS`, `CLAUDE_ROUTER_STATE_LOCK_STALE_MS`).
+- Atomic conditional job transitions (`transitionJob`) that write the job index and per-job file together under the state lock.
+- Process identity records (PID plus start time) with fail-closed PID-reuse verification for tracked jobs and lock holders.
+- Cancel ownership protocol: cancellation atomically claims a job before any kill, releases ownership when a kill fails, and finalizes idempotently whether the runner or the canceller observes child exit first.
+- Foreground jobs now track the Claude child process identity separately from the companion wrapper, so `cancel` terminates the Claude process tree rather than the wrapper.
+- Graceful process-tree termination with SIGTERM to SIGKILL escalation and post-kill verification; active jobs whose recorded process is gone are marked failed as stale.
+- MCP tool input validation returning JSON-RPC `-32602` invalid-params errors; read-only routed commands no longer advertise write-capable controls in their MCP schemas.
+
+### Fixed
+
+- Preserved explicit `--tools ""` (disable all built-in tools) through raw-string tokenization, routing, and MCP flag plumbing.
+- Treated `--tmux` as a bare boolean flag so inline `--tmux=classic` no longer consumes the following token.
+
 ## [2.2.4] — 2026-07-09
 
 ### Fixed

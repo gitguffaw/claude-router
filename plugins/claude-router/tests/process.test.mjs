@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
-import { isProcessAlive, runProcess, terminateProcessTree, verifyProcessRecord } from "../scripts/lib/process.mjs";
+import { handleCancel } from "../scripts/lib/job-commands.mjs";
+import {
+  getProcessStartTime,
+  isProcessAlive,
+  isProcessGroupAlive,
+  runProcess,
+  terminateProcessTree,
+  verifyProcessRecord
+} from "../scripts/lib/process.mjs";
+import { readJobFile, upsertJob, writeJobFile } from "../scripts/lib/state.mjs";
+import { makeTempDir } from "./helpers.mjs";
 
 function processAlive(pid) {
   try {
@@ -9,6 +22,27 @@ function processAlive(pid) {
   } catch {
     return false;
   }
+}
+
+function processGroupAlive(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function cleanupDir(dir) {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function psResult(startTime, status = 0) {
@@ -81,6 +115,19 @@ test("isProcessAlive treats EPERM as alive via injectable probe defaults", () =>
   assert.equal(isProcessAlive(42, { isProcessAliveImpl: () => true }), true);
 });
 
+test("isProcessGroupAlive injectable behavior: ESRCH false, success true, EPERM true", () => {
+  // Injectable contract mirrors default probe outcomes (boolean only).
+  assert.equal(isProcessGroupAlive(42, { isProcessGroupAliveImpl: () => false }), false); // ESRCH
+  assert.equal(isProcessGroupAlive(42, { isProcessGroupAliveImpl: () => true }), true); // success
+  assert.equal(isProcessGroupAlive(42, { isProcessGroupAliveImpl: () => true }), true); // EPERM → alive
+  assert.equal(isProcessGroupAlive(Number.NaN), false);
+
+  // Default probe: empty group → ESRCH → false (POSIX).
+  if (process.platform !== "win32") {
+    assert.equal(isProcessGroupAlive(999999991), false);
+  }
+});
+
 test("terminateProcessTree Windows-style taskkill returns post-kill gone verification", async () => {
   let alive = true;
   const commands = [];
@@ -107,6 +154,7 @@ test("terminateProcessTree Windows-style taskkill returns post-kill gone verific
   assert.equal(result.attempted, true);
   assert.equal(result.delivered, true);
   assert.equal(result.method, "taskkill");
+  assert.equal(result.groupCleared, true);
   assert.ok(
     commands.some((entry) => entry[0] === "taskkill" && entry.includes("777")),
     `expected taskkill for pid 777, got ${JSON.stringify(commands)}`
@@ -131,6 +179,7 @@ test("terminateProcessTree refuses to signal a reused PID", async () => {
 
   assert.equal(result.attempted, false);
   assert.equal(result.verification.reason, "pid-reused");
+  assert.equal(result.groupCleared, true);
   assert.deepEqual(signals, []);
 });
 
@@ -147,6 +196,7 @@ test("terminateProcessTree escalates from SIGTERM to SIGKILL when process stays 
           alive = false;
         }
       },
+      isProcessGroupAliveImpl: () => alive,
       stopGraceMs: 1,
       hardTimeoutMs: 20,
       pollIntervalMs: 1
@@ -156,7 +206,229 @@ test("terminateProcessTree escalates from SIGTERM to SIGKILL when process stays 
   assert.equal(result.attempted, true);
   assert.equal(result.delivered, true);
   assert.equal(result.escalated, true);
+  assert.equal(result.groupCleared, true);
   assert.deepEqual(signals, [[-123, "SIGTERM"], [-123, "SIGKILL"]]);
+});
+
+test("terminateProcessTree skips group SIGKILL when leader pid is reused during grace", async () => {
+  // Leader matches at entry, dies during grace, then the pid reappears with a
+  // new start time (pid-reused) while the group probe still reports alive.
+  // Escalating with kill(-pid, SIGKILL) would hit an innocent new group.
+  const originalStart = "Mon Jan  1 00:00:00 2026";
+  const reusedStart = "Tue Jan  2 12:00:00 2026";
+  let psCalls = 0;
+  const signals = [];
+  const result = await terminateProcessTree(
+    { pid: 424242, processStartTime: originalStart, processGroup: true },
+    {
+      runCommandImpl: () => {
+        psCalls += 1;
+        // Initial verify + first grace poll still match the recorded leader.
+        if (psCalls <= 2) {
+          return psResult(originalStart);
+        }
+        // Subsequent polls: leader gone then recycled under the same pid.
+        if (psCalls === 3) {
+          return psResult("", 1);
+        }
+        return psResult(reusedStart);
+      },
+      isProcessGroupAliveImpl: () => true,
+      killImpl: (pid, signal) => {
+        signals.push([pid, signal]);
+      },
+      stopGraceMs: 40,
+      hardTimeoutMs: 80,
+      pollIntervalMs: 5
+    }
+  );
+
+  assert.equal(result.attempted, true);
+  assert.equal(result.delivered, true);
+  assert.equal(result.escalated, false);
+  assert.equal(result.method, "process-group");
+  assert.equal(result.verification.reason, "pid-reused");
+  assert.equal(result.verification.matches, false);
+  assert.equal(result.groupCleared, false);
+  assert.deepEqual(
+    signals,
+    [[-424242, "SIGTERM"]],
+    `expected only group SIGTERM (no SIGKILL); got ${JSON.stringify(signals)}`
+  );
+  assert.ok(
+    !signals.some(([, signal]) => signal === "SIGKILL"),
+    "must not issue group-targeted SIGKILL after pid-reuse detection"
+  );
+});
+
+test("terminateProcessTree sets groupCleared true for non-group process method", async () => {
+  let alive = true;
+  const signals = [];
+  const result = await terminateProcessTree(
+    { pid: 456, processStartTime: "Mon Jan  1 00:00:00 2026", processGroup: false },
+    {
+      runCommandImpl: () => alive ? psResult("Mon Jan  1 00:00:00 2026") : psResult("", 1),
+      killImpl: (pid, signal) => {
+        signals.push([pid, signal]);
+        if (signal === "SIGTERM") {
+          alive = false;
+        }
+      },
+      processGroup: false,
+      stopGraceMs: 1,
+      hardTimeoutMs: 20,
+      pollIntervalMs: 1
+    }
+  );
+
+  assert.equal(result.attempted, true);
+  assert.equal(result.delivered, true);
+  assert.equal(result.escalated, false);
+  assert.equal(result.method, "process");
+  assert.equal(result.groupCleared, true);
+  assert.deepEqual(signals, [[456, "SIGTERM"]]);
+});
+
+test("terminateProcessTree escalates when process-group members ignore SIGTERM after leader exits", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX process-group semantics only");
+    return;
+  }
+
+  // Grandchild ignores SIGTERM and keeps the process group alive after the leader exits.
+  // Ready file ensures the trap is installed before we signal the group.
+  const readyDir = makeTempDir();
+  const readyFile = path.join(readyDir, "ready");
+  const grandchildCode = [
+    "process.on('SIGTERM', () => {});",
+    "setInterval(() => {}, 1000);",
+    `require('fs').writeFileSync(${JSON.stringify(readyFile)}, 'ready');`,
+    "setTimeout(() => process.exit(0), 60000);"
+  ].join("");
+  const leaderCode = [
+    "const { spawn } = require('child_process');",
+    // Same process group as the detached leader (default; not re-detached).
+    `spawn(process.execPath, ${JSON.stringify(["-e", grandchildCode])}, { stdio: 'ignore' });`,
+    // Stay alive until SIGTERM so verifyProcessRecord still matches at terminate start.
+    "setTimeout(() => process.exit(0), 15000);"
+  ].join("");
+
+  const leader = spawn(process.execPath, ["-e", leaderCode], {
+    detached: true,
+    stdio: "ignore"
+  });
+  leader.unref();
+  const pid = leader.pid;
+  assert.ok(Number.isFinite(pid) && pid > 0, "leader pid required");
+
+  try {
+    const readyDeadline = Date.now() + 5000;
+    while (!fs.existsSync(readyFile) && Date.now() < readyDeadline) {
+      await sleep(25);
+    }
+    assert.ok(fs.existsSync(readyFile), "grandchild must install SIGTERM trap before terminate");
+    assert.equal(processAlive(pid), true, "leader must still be alive when terminate starts");
+    assert.equal(processGroupAlive(pid), true, "process group must be live before terminate");
+
+    const processStartTime = getProcessStartTime(pid);
+    const result = await terminateProcessTree(
+      { pid, processStartTime, processGroup: true },
+      {
+        // Grace long enough for the leader to die under SIGTERM while the trapped
+        // grandchild keeps the group alive — forces SIGKILL escalation.
+        stopGraceMs: 500,
+        hardTimeoutMs: 4000,
+        pollIntervalMs: 40,
+        allowUnverified: !processStartTime
+      }
+    );
+
+    assert.equal(result.attempted, true);
+    assert.equal(result.delivered, true);
+    assert.equal(result.method, "process-group");
+    assert.equal(result.groupCleared, true, "group must be empty after terminate");
+    assert.equal(result.escalated, true, "SIGKILL required for SIGTERM-trapping grandchild");
+    assert.equal(result.verification.matches, false);
+
+    let groupStillAlive = false;
+    try {
+      process.kill(-pid, 0);
+      groupStillAlive = true;
+    } catch (error) {
+      assert.equal(error.code, "ESRCH", `expected empty group (ESRCH), got ${error.code}`);
+    }
+    assert.equal(groupStillAlive, false, "kill(-pid, 0) must fail with ESRCH when group is clear");
+  } finally {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+    cleanupDir(readyDir);
+  }
+});
+
+test("handleCancel markCancelFailed when groupCleared is false despite leader gone", async () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    const job = {
+      id: "group-uncleared-cancel",
+      workspaceRoot: cwd,
+      status: "running",
+      phase: "running",
+      mode: "analyze",
+      pid: 888001,
+      processStartTime: "Mon Jan  1 00:00:00 2026",
+      processGroup: true,
+      logFile: null
+    };
+    writeJobFile(cwd, job.id, job);
+    upsertJob(cwd, job);
+
+    await assert.rejects(
+      () => handleCancel(cwd, {
+        reference: job.id,
+        json: true,
+        terminateProcessTreeImpl: async () => ({
+          attempted: true,
+          delivered: true,
+          escalated: false,
+          method: "process-group",
+          verification: {
+            alive: false,
+            matches: false,
+            reason: "not-running",
+            currentStartTime: null
+          },
+          groupCleared: false
+        })
+      }),
+      /Cannot confirm cancellation/
+    );
+
+    const afterCancel = readJobFile(cwd, job.id);
+    assert.equal(afterCancel.status, "running");
+    assert.equal(afterCancel.phase, "cancel-failed");
+    assert.equal(afterCancel.cancelRequestedAt, undefined);
+    assert.ok(afterCancel.cancelFailedAt);
+    assert.equal(afterCancel.cancelSignal.groupCleared, false);
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
 });
 
 test("runProcess resolves tracking failure only after child is gone", async () => {

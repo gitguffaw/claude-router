@@ -81,6 +81,37 @@ export function isProcessAlive(pid, options = {}) {
   return Boolean(probe(Number(pid)));
 }
 
+function defaultProcessGroupAliveProbe(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || process.platform === "win32") {
+    return false;
+  }
+  try {
+    // kill(-pgid, 0) succeeds while any member of the group exists.
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: members exist but are not signalable by this user.
+    if (error && error.code === "EPERM") {
+      return true;
+    }
+    // ESRCH (and other failures): treat as empty / not alive.
+    return false;
+  }
+}
+
+/**
+ * POSIX process-group existence probe. Injectable via options.isProcessGroupAliveImpl.
+ * Uses process.kill(-pid, 0); EPERM counts as alive; ESRCH means the group is empty.
+ * On Windows always false (not applicable).
+ */
+export function isProcessGroupAlive(pid, options = {}) {
+  if (!Number.isFinite(pid)) {
+    return false;
+  }
+  const probe = options.isProcessGroupAliveImpl ?? defaultProcessGroupAliveProbe;
+  return Boolean(probe(Number(pid)));
+}
+
 export function buildProcessRecord(pid, options = {}) {
   const base = Number.isFinite(pid) ? { pid, processStartTime: getProcessStartTime(pid, options) } : { pid: null, processStartTime: null };
   if (typeof options.processGroup === "boolean") {
@@ -154,6 +185,22 @@ async function waitUntilGone(record, deadline, pollIntervalMs, options = {}) {
     verification = verifyProcessRecord(record, options);
   }
   return verification;
+}
+
+/**
+ * Wait until the recorded leader no longer matches and, when checkGroup is set,
+ * until the process group probe reports empty (or the deadline elapses).
+ */
+async function waitUntilTreeClear(record, pid, deadline, pollIntervalMs, options = {}, checkGroup = false) {
+  let verification = verifyProcessRecord(record, options);
+  let groupAlive = checkGroup ? isProcessGroupAlive(pid, options) : false;
+  while ((verification.matches || groupAlive) && Date.now() < deadline) {
+    await sleep(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())));
+    verification = verifyProcessRecord(record, options);
+    groupAlive = checkGroup ? isProcessGroupAlive(pid, options) : false;
+  }
+  const groupCleared = checkGroup ? !isProcessGroupAlive(pid, options) : true;
+  return { verification, groupCleared };
 }
 
 export function runProcess(command, args = [], options = {}) {
@@ -424,11 +471,18 @@ export function spawnDetached(command, args = [], options = {}) {
 export async function terminateProcessTree(record, options = {}) {
   const pid = typeof record === "number" ? record : record?.pid;
   if (!Number.isFinite(pid)) {
-    return { attempted: false, delivered: false, escalated: false, method: null, verification: { reason: "missing-pid" } };
+    return {
+      attempted: false,
+      delivered: false,
+      escalated: false,
+      method: null,
+      verification: { reason: "missing-pid" },
+      groupCleared: true
+    };
   }
   const verification = verifyProcessRecord(record, options);
   if (!verification.matches) {
-    return { attempted: false, delivered: false, escalated: false, method: null, verification };
+    return { attempted: false, delivered: false, escalated: false, method: null, verification, groupCleared: true };
   }
   const killImpl = options.killImpl ?? process.kill.bind(process);
   const runCommandImpl = options.runCommandImpl ?? runCommand;
@@ -451,17 +505,52 @@ export async function terminateProcessTree(record, options = {}) {
           if (innerError?.code !== "ESRCH") {
             throw innerError;
           }
-          return { attempted: true, delivered: false, escalated: false, method, verification: verifyProcessRecord(record, options) };
+          return {
+            attempted: true,
+            delivered: false,
+            escalated: false,
+            method,
+            verification: verifyProcessRecord(record, options),
+            groupCleared: true
+          };
         }
       } else if (error?.code === "ESRCH") {
-        return { attempted: true, delivered: false, escalated: false, method, verification: verifyProcessRecord(record, options) };
+        return {
+          attempted: true,
+          delivered: false,
+          escalated: false,
+          method,
+          verification: verifyProcessRecord(record, options),
+          groupCleared: true
+        };
       } else {
         throw error;
       }
     }
-    const afterTerm = await waitUntilGone(record, Date.now() + stopGraceMs, pollIntervalMs, options);
-    if (!afterTerm.matches) {
-      return { attempted: true, delivered: true, escalated: false, method, verification: afterTerm };
+    const checkGroup = method === "process-group";
+    const graceDeadline = Date.now() + stopGraceMs;
+    const afterTerm = await waitUntilTreeClear(record, pid, graceDeadline, pollIntervalMs, options, checkGroup);
+    // Leader start time changed: pid was recycled. pgid==pid may now be an
+    // innocent new group — never escalate with group-targeted SIGKILL.
+    if (checkGroup && afterTerm.verification.reason === "pid-reused") {
+      return {
+        attempted: true,
+        delivered: true,
+        escalated: false,
+        method,
+        verification: afterTerm.verification,
+        groupCleared: false
+      };
+    }
+    if (!afterTerm.verification.matches && afterTerm.groupCleared) {
+      return {
+        attempted: true,
+        delivered: true,
+        escalated: false,
+        method,
+        verification: afterTerm.verification,
+        groupCleared: afterTerm.groupCleared
+      };
     }
     try {
       killImpl(method === "process-group" ? processGroupSignalTarget(pid) : pid, "SIGKILL");
@@ -470,11 +559,32 @@ export async function terminateProcessTree(record, options = {}) {
         throw error;
       }
     }
-    const afterKill = await waitUntilGone(record, Date.now() + Math.max(0, hardTimeoutMs - stopGraceMs), pollIntervalMs, options);
-    return { attempted: true, delivered: true, escalated: true, method, verification: afterKill };
+    const hardDeadline = Date.now() + Math.max(0, hardTimeoutMs - stopGraceMs);
+    const afterKill = await waitUntilTreeClear(record, pid, hardDeadline, pollIntervalMs, options, checkGroup);
+    // If reuse is only observed after SIGKILL was already sent, still refuse
+    // to report the group clear so callers will not finalize cancelled.
+    if (checkGroup && afterKill.verification.reason === "pid-reused") {
+      return {
+        attempted: true,
+        delivered: true,
+        escalated: true,
+        method,
+        verification: afterKill.verification,
+        groupCleared: false
+      };
+    }
+    return {
+      attempted: true,
+      delivered: true,
+      escalated: true,
+      method,
+      verification: afterKill.verification,
+      groupCleared: afterKill.groupCleared
+    };
   }
 
   // Windows (or forced) taskkill path: always return post-termination verification.
+  // taskkill /T already covers the tree; groupCleared is not applicable → true.
   const result = runCommandImpl("taskkill", ["/PID", String(pid), "/T", "/F"], options);
   const afterKill = await waitUntilGone(record, Date.now() + hardTimeoutMs, pollIntervalMs, options);
   return {
@@ -483,6 +593,7 @@ export async function terminateProcessTree(record, options = {}) {
     escalated: result.status === 0,
     method: "taskkill",
     result,
-    verification: afterKill
+    verification: afterKill,
+    groupCleared: true
   };
 }

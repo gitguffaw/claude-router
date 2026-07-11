@@ -304,7 +304,8 @@ export async function handleCancel(cwd, { reference = "", json = false, terminat
     throw new Error(`Cannot cancel job ${resolved.id}: recorded process ${reason}.`);
   }
 
-  if (signal.verification?.matches) {
+  // Leader still matches, or process-group members survived after the leader exited.
+  if (signal.verification?.matches || signal.groupCleared === false) {
     const afterMatch = readFullJob(cwd, resolved.id);
     if (afterMatch?.status === "cancelled") {
       reportCancelled(afterMatch);

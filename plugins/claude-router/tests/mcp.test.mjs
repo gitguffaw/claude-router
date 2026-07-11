@@ -679,6 +679,97 @@ test("mcp tools/call concurrency queue: 20 fast calls all respond", async () => 
   }
 });
 
+test("mcp relative cwd is resolved once against server cwd (no double segment)", async () => {
+  // DEFECT: relative cwd used as spawn cwd and again as --cwd → companion path.resolve
+  // against already-chdir'd process.cwd produced …/myrepo/myrepo.
+  const bin = makeTempDir();
+  const base = makeTempDir();
+  const myrepo = path.join(base, "myrepo");
+  fs.mkdirSync(myrepo, { recursive: true });
+  installFakeClaude(bin);
+  initGitRepo(myrepo);
+  const doubleSegment = path.join(myrepo, "myrepo");
+  assert.equal(fs.existsSync(doubleSegment), false);
+
+  const proc = spawn("node", [SERVER], { cwd: base, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const result = await request(proc, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "claude_router_analyze",
+        arguments: { cwd: "myrepo", prompt: "relative cwd must not double-resolve" }
+      }
+    });
+    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
+    const payload = JSON.parse(result.result.content[0].text);
+    // Strongest observable: job workspace is base/myrepo, not base/myrepo/myrepo.
+    // realpath: macOS /var vs /private/var; git may report either form.
+    assert.equal(fs.realpathSync(payload.workspaceRoot), fs.realpathSync(myrepo));
+    assert.equal(fs.existsSync(doubleSegment), false);
+    assert.notEqual(
+      path.normalize(payload.workspaceRoot).replace(/\/+$/, ""),
+      path.normalize(doubleSegment).replace(/\/+$/, "")
+    );
+    assert.match(payload.workspaceRoot, /myrepo$/);
+    assert.doesNotMatch(payload.workspaceRoot, /myrepo[/\\]myrepo$/);
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("mcp absolute cwd is unchanged (regression pin)", async () => {
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const result = await request(proc, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "claude_router_analyze",
+        arguments: { cwd: repo, prompt: "absolute cwd pin" }
+      }
+    });
+    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
+    const payload = JSON.parse(result.result.content[0].text);
+    assert.equal(fs.realpathSync(payload.workspaceRoot), fs.realpathSync(repo));
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("mcp omitted cwd defaults to plugin ROOT (regression pin)", async () => {
+  const bin = makeTempDir();
+  installFakeClaude(bin);
+  // models --static is the cheapest tool; omits cwd so spawn uses ROOT and --cwd is absent.
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const result = await request(proc, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "claude_router_models",
+        arguments: { static: true }
+      }
+    });
+    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
+    assert.ok(result.result?.content?.[0]?.text);
+    const payload = JSON.parse(result.result.content[0].text);
+    assert.ok(payload.models || payload.curated || Array.isArray(payload) || typeof payload === "object");
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
 test("mcp SIGTERM sweeps in-flight companion when harness can observe child death", async () => {
   // Optional integration: companion is the tracked process group. Nested detached fake
   // claude may not die with the companion; only fail if the server itself fails to exit.

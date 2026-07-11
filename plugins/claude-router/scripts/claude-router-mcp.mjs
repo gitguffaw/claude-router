@@ -448,19 +448,34 @@ function buildCompanionArgs(tool, input = {}) {
   return args;
 }
 
+/**
+ * Resolve MCP cwd once against the server process cwd so spawn and --cwd share
+ * one absolute path. Relative values must not be re-resolved inside the companion
+ * after spawn has already chdir'd into them (…/myrepo/myrepo).
+ */
+function resolveMcpCwd(cwd) {
+  if (!cwd) {
+    return undefined;
+  }
+  return path.resolve(process.cwd(), cwd);
+}
+
 async function callTool(name, input = {}) {
   const tool = tools.find((candidate) => candidate.name === name);
   if (!tool) {
     throw new Error(`Unknown tool ${name}`);
   }
   validateAgainstSchema(schemaFor(tool), input ?? {});
-  const args = buildCompanionArgs(tool, input);
-  const outerTimeoutMs = resolveOuterTimeoutMs(input.timeout_ms);
+  // Canonicalize once at the MCP boundary before buildCompanionArgs and spawn.
+  const resolvedCwd = resolveMcpCwd(input.cwd);
+  const toolInput = resolvedCwd ? { ...input, cwd: resolvedCwd } : input;
+  const args = buildCompanionArgs(tool, toolInput);
+  const outerTimeoutMs = resolveOuterTimeoutMs(toolInput.timeout_ms);
   let inFlightEntry = null;
   let result;
   try {
     result = await runProcess(process.execPath, args, {
-      cwd: input.cwd || ROOT,
+      cwd: resolvedCwd || ROOT,
       env: process.env,
       timeoutMs: outerTimeoutMs,
       maxOutputBytes: COMPANION_MAX_OUTPUT_BYTES,

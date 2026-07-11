@@ -16,7 +16,12 @@ import {
   upsertJob,
   writeJobFile
 } from "../scripts/lib/state.mjs";
-import { isCancelInProgress, runTrackedJob, trackChildProcessIdentity } from "../scripts/lib/tracked-jobs.mjs";
+import {
+  ACTIVE_JOB_STATUSES,
+  isCancelInProgress,
+  runTrackedJob,
+  trackChildProcessIdentity
+} from "../scripts/lib/tracked-jobs.mjs";
 import { handleCancel, refreshStaleActiveJobs } from "../scripts/lib/job-commands.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -393,6 +398,198 @@ test("MAX_JOBS retention still prunes oldest indexed jobs under lock", () => {
       assert.ok(jobs.some((job) => job.id === "retention-54"));
       assert.equal(readJobFile(cwd, "retention-00"), null);
       assert.ok(readJobFile(cwd, "retention-54"));
+    });
+  } finally {
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("MAX_JOBS retention never prunes running jobs older than terminal overflow", () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  try {
+    withDataDir(dataDir, () => {
+      const runningId = "active-running-old";
+      // Insert first so its updatedAt is older than the terminal flood below.
+      upsertJob(cwd, {
+        id: runningId,
+        status: "running",
+        phase: "running",
+        mode: "analyze",
+        summary: runningId
+      });
+      writeJobFile(cwd, runningId, { id: runningId, status: "running", phase: "running" });
+
+      for (let index = 0; index < 55; index += 1) {
+        const id = `terminal-${String(index).padStart(2, "0")}`;
+        upsertJob(cwd, { id, status: "completed", mode: "analyze", summary: id });
+        writeJobFile(cwd, id, { id, status: "completed" });
+      }
+
+      const jobs = listJobs(cwd);
+      const indexed = jobs.find((job) => job.id === runningId);
+      assert.ok(indexed, "running job must remain in the index under terminal overflow");
+      assert.equal(indexed.status, "running");
+      assert.ok(fs.existsSync(resolveJobFile(cwd, runningId)), "running job file must not be deleted");
+      assert.ok(readJobFile(cwd, runningId), "running job file must still be readable");
+
+      const terminal = jobs.filter((job) => job.status === "completed");
+      assert.equal(terminal.length, 50, "terminal records must still be capped at MAX_JOBS");
+      assert.ok(!jobs.some((job) => job.id === "terminal-00"), "oldest terminal index entry must be pruned");
+      assert.ok(jobs.some((job) => job.id === "terminal-54"), "newest terminal must be retained");
+      assert.equal(readJobFile(cwd, "terminal-00"), null, "oldest terminal job file must be cleaned up");
+      assert.ok(readJobFile(cwd, "terminal-54"), "newest terminal job file must remain");
+      assert.equal(jobs.length, 51, "1 active + MAX_JOBS terminal");
+    });
+  } finally {
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("MAX_JOBS retention does not cap active jobs", () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  try {
+    withDataDir(dataDir, () => {
+      for (let index = 0; index < 60; index += 1) {
+        const id = `active-${String(index).padStart(2, "0")}`;
+        const status = index % 2 === 0 ? "queued" : "running";
+        upsertJob(cwd, { id, status, phase: status, mode: "analyze", summary: id });
+        writeJobFile(cwd, id, { id, status, phase: status });
+      }
+      const jobs = listJobs(cwd);
+      assert.equal(jobs.length, 60, "all active jobs must be retained with no cap");
+      for (let index = 0; index < 60; index += 1) {
+        const id = `active-${String(index).padStart(2, "0")}`;
+        assert.ok(jobs.some((job) => job.id === id), `missing active job ${id}`);
+        assert.ok(fs.existsSync(resolveJobFile(cwd, id)), `missing job file for ${id}`);
+      }
+    });
+  } finally {
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("MAX_JOBS retention treats ACTIVE_JOB_STATUSES as non-prunable (drift pin)", () => {
+  // state.mjs keeps a private copy of active statuses to avoid a tracked-jobs import cycle.
+  // This pins both definitions functionally equal without reading state internals.
+  assert.ok(ACTIVE_JOB_STATUSES.size > 0, "ACTIVE_JOB_STATUSES must export at least one status");
+
+  for (const status of ACTIVE_JOB_STATUSES) {
+    const dataDir = makeTempDir();
+    const cwd = makeTempDir();
+    try {
+      withDataDir(dataDir, () => {
+        const activeId = `active-${status}-old`;
+        upsertJob(cwd, {
+          id: activeId,
+          status,
+          phase: status,
+          mode: "analyze",
+          summary: activeId
+        });
+        writeJobFile(cwd, activeId, { id: activeId, status, phase: status });
+
+        for (let index = 0; index < 55; index += 1) {
+          const id = `terminal-${status}-${String(index).padStart(2, "0")}`;
+          upsertJob(cwd, { id, status: "completed", mode: "analyze", summary: id });
+          writeJobFile(cwd, id, { id, status: "completed" });
+        }
+
+        const jobs = listJobs(cwd);
+        const indexed = jobs.find((job) => job.id === activeId);
+        assert.ok(indexed, `status ${status} job must survive terminal overflow`);
+        assert.equal(indexed.status, status);
+        assert.ok(fs.existsSync(resolveJobFile(cwd, activeId)), `status ${status} job file must remain`);
+        assert.ok(readJobFile(cwd, activeId), `status ${status} job file must be readable`);
+      });
+    } finally {
+      cleanupDir(dataDir);
+      cleanupDir(cwd);
+    }
+  }
+
+  // Made-up terminal-ish status must remain prunable (not silently treated as active).
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  try {
+    withDataDir(dataDir, () => {
+      const fakeId = "fake-terminal-ish-old";
+      const fakeStatus = "finished-ish";
+      assert.ok(
+        !ACTIVE_JOB_STATUSES.has(fakeStatus),
+        "test status must not be in ACTIVE_JOB_STATUSES"
+      );
+      upsertJob(cwd, {
+        id: fakeId,
+        status: fakeStatus,
+        phase: fakeStatus,
+        mode: "analyze",
+        summary: fakeId
+      });
+      writeJobFile(cwd, fakeId, { id: fakeId, status: fakeStatus, phase: fakeStatus });
+
+      for (let index = 0; index < 55; index += 1) {
+        const id = `terminal-fake-${String(index).padStart(2, "0")}`;
+        upsertJob(cwd, { id, status: "completed", mode: "analyze", summary: id });
+        writeJobFile(cwd, id, { id, status: "completed" });
+      }
+
+      const jobs = listJobs(cwd);
+      assert.ok(!jobs.some((job) => job.id === fakeId), "made-up terminal-ish status must be prunable");
+      assert.equal(readJobFile(cwd, fakeId), null, "made-up terminal-ish job file must be cleaned up");
+      assert.ok(jobs.some((job) => job.id === "terminal-fake-54"), "newest terminal must remain");
+    });
+  } finally {
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
+});
+
+test("MAX_JOBS retention never prunes cancelling jobs older than terminal overflow", () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  try {
+    withDataDir(dataDir, () => {
+      const cancellingId = "active-cancelling-old";
+      // Insert first so its updatedAt is older than the terminal flood below.
+      upsertJob(cwd, {
+        id: cancellingId,
+        status: "running",
+        phase: "cancelling",
+        cancelRequestedAt: new Date(Date.now() - 86_400_000).toISOString(),
+        mode: "analyze",
+        summary: cancellingId
+      });
+      writeJobFile(cwd, cancellingId, {
+        id: cancellingId,
+        status: "running",
+        phase: "cancelling",
+        cancelRequestedAt: new Date(Date.now() - 86_400_000).toISOString()
+      });
+
+      for (let index = 0; index < 55; index += 1) {
+        const id = `terminal-cancel-${String(index).padStart(2, "0")}`;
+        upsertJob(cwd, { id, status: "completed", mode: "analyze", summary: id });
+        writeJobFile(cwd, id, { id, status: "completed" });
+      }
+
+      const jobs = listJobs(cwd);
+      const indexed = jobs.find((job) => job.id === cancellingId);
+      assert.ok(indexed, "cancelling job must remain in the index under terminal overflow");
+      assert.equal(indexed.status, "running");
+      assert.equal(indexed.phase, "cancelling");
+      assert.ok(fs.existsSync(resolveJobFile(cwd, cancellingId)), "cancelling job file must not be deleted");
+      assert.ok(readJobFile(cwd, cancellingId), "cancelling job file must still be readable");
+
+      const terminal = jobs.filter((job) => job.status === "completed");
+      assert.equal(terminal.length, 50, "terminal records must still be capped at MAX_JOBS");
+      assert.ok(!jobs.some((job) => job.id === "terminal-cancel-00"), "oldest terminal index entry must be pruned");
+      assert.ok(jobs.some((job) => job.id === "terminal-cancel-54"), "newest terminal must be retained");
+      assert.equal(jobs.length, 51, "1 cancelling + MAX_JOBS terminal");
     });
   } finally {
     cleanupDir(dataDir);

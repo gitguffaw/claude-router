@@ -7,6 +7,8 @@ import { resolveWorkspaceRoot } from "./workspace.mjs";
 
 const STATE_VERSION = 1;
 const MAX_JOBS = 50;
+// Local copy of tracked-jobs ACTIVE_JOB_STATUSES — cannot import (cycle: tracked-jobs → state).
+const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
 const STATE_FILE_NAME = "state.json";
 const LOCK_FILE_NAME = "state.lock";
 const JOBS_DIR_NAME = "jobs";
@@ -78,10 +80,31 @@ export function loadState(cwd) {
   }
 }
 
+function isNonPrunableJob(job) {
+  if (!job) {
+    return false;
+  }
+  // Cancel owns the lifecycle; never drop while cancelling even if status drifts.
+  if (job.phase === "cancelling" || job.cancelRequestedAt) {
+    return true;
+  }
+  return ACTIVE_JOB_STATUSES.has(job.status);
+}
+
 function pruneJobs(jobs) {
-  return [...jobs]
-    .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))
-    .slice(0, MAX_JOBS);
+  // Retention caps only terminal records. Active/cancelling jobs are always kept
+  // so a long-running process cannot lose its index entry, job file, or log.
+  const active = [];
+  const terminal = [];
+  for (const job of jobs ?? []) {
+    if (isNonPrunableJob(job)) {
+      active.push(job);
+    } else {
+      terminal.push(job);
+    }
+  }
+  terminal.sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")));
+  return [...active, ...terminal.slice(0, MAX_JOBS)];
 }
 
 function removeIfExists(file) {

@@ -124,3 +124,72 @@ test("parseClaudeArgv recognizes current Claude lifecycle and MCP commands", () 
   assert.deepEqual(gateway.commandPath, ["gateway"]);
   assert.deepEqual([...mcpLogin.unknown.commands, ...remoteControl.unknown.commands, ...stop.unknown.commands, ...gateway.unknown.commands], []);
 });
+
+test("parseClaudeArgv treats Claude boolean prefixes as non-value-taking for safety classification", () => {
+  const excludePrefix = parseClaudeArgv([
+    "--exclude-dynamic-system-prompt-sections",
+    "mcp",
+    "remove",
+    "example"
+  ]);
+  const tmuxPrefix = parseClaudeArgv(["--tmux", "mcp", "remove", "example"]);
+  const tmuxClassic = parseClaudeArgv(["--tmux=classic", "mcp", "remove", "example"]);
+
+  assert.deepEqual(excludePrefix.commandPath, ["mcp", "remove"]);
+  assert.deepEqual(excludePrefix.positionals, ["example"]);
+  assert.deepEqual(excludePrefix.globalFlags.map((flag) => [flag.name, flag.value, flag.inline]), [
+    ["exclude-dynamic-system-prompt-sections", true, false]
+  ]);
+  assert.deepEqual(excludePrefix.unknown.flags, []);
+
+  assert.deepEqual(tmuxPrefix.commandPath, ["mcp", "remove"]);
+  assert.deepEqual(tmuxPrefix.positionals, ["example"]);
+  assert.deepEqual(tmuxPrefix.globalFlags.map((flag) => [flag.name, flag.value, flag.inline]), [
+    ["tmux", true, false]
+  ]);
+  assert.deepEqual(tmuxPrefix.unknown.flags, []);
+
+  assert.deepEqual(tmuxClassic.commandPath, ["mcp", "remove"]);
+  assert.deepEqual(tmuxClassic.positionals, ["example"]);
+  assert.deepEqual(tmuxClassic.globalFlags.map((flag) => [flag.name, flag.value, flag.inline]), [
+    ["tmux", true, true]
+  ]);
+  assert.deepEqual(tmuxClassic.unknown.flags, []);
+});
+
+test("parseClaudeArgv preserves dangerous permission-mode after Claude boolean prefixes", () => {
+  const excludePrefix = parseClaudeArgv([
+    "--exclude-dynamic-system-prompt-sections",
+    "--permission-mode",
+    "bypassPermissions",
+    "mcp",
+    "list"
+  ]);
+  const tmuxPrefix = parseClaudeArgv([
+    "--tmux",
+    "--permission-mode",
+    "bypassPermissions"
+  ]);
+  const tmuxClassic = parseClaudeArgv([
+    "--tmux=classic",
+    "--permission-mode",
+    "bypassPermissions",
+    "mcp",
+    "list"
+  ]);
+
+  assert.deepEqual(excludePrefix.commandPath, ["mcp", "list"]);
+  assert.equal(
+    excludePrefix.globalFlags.find((flag) => flag.name === "permission-mode")?.value,
+    "bypassPermissions"
+  );
+  assert.deepEqual(tmuxPrefix.globalFlags.map((flag) => [flag.name, flag.value]), [
+    ["tmux", true],
+    ["permission-mode", "bypassPermissions"]
+  ]);
+  assert.deepEqual(tmuxClassic.commandPath, ["mcp", "list"]);
+  assert.equal(
+    tmuxClassic.globalFlags.find((flag) => flag.name === "permission-mode")?.value,
+    "bypassPermissions"
+  );
+});

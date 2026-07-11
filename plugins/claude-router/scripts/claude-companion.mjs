@@ -12,9 +12,9 @@ import { renderModelCatalog, renderSetupReport, renderStartedJob } from "./lib/r
 import { ROUTER_COMMANDS } from "./lib/router-commands.mjs";
 import { ROUTED_BOOLEAN_OPTIONS, ROUTED_OPTIONAL_VALUE_OPTIONS, ROUTED_REPEATABLE_OPTIONS, ROUTED_VALUE_OPTIONS } from "./lib/routed-controls.mjs";
 import { buildRouterRequest } from "./lib/router.mjs";
-import { binaryAvailable, runCommand, runProcess, spawnDetached } from "./lib/process.mjs";
-import { generateJobId, readJobFile, resolveJobFile, upsertJob, writeJobFile } from "./lib/state.mjs";
-import { appendLogLine, createJobLogFile, runTrackedJob } from "./lib/tracked-jobs.mjs";
+import { binaryAvailable, runCommand, runProcess, spawnDetached, terminateProcessTree } from "./lib/process.mjs";
+import { generateJobId, readJobFile, resolveJobFile, transitionJob } from "./lib/state.mjs";
+import { appendLogLine, cancelledJobResult, createJobLogFile, isCancelInProgress, runTrackedJob, TERMINAL_JOB_STATUSES } from "./lib/tracked-jobs.mjs";
 import { readGitStatus, resolveWorkspaceRoot } from "./lib/workspace.mjs";
 import { getModelCatalog } from "./lib/model-catalog.mjs";
 
@@ -351,16 +351,23 @@ async function runStoredJob(workspaceRoot, jobId, options = {}) {
     throw new Error(`Missing stored job ${jobId}`);
   }
   const logFile = stored.logFile;
-  const result = await runTrackedJob(stored, async () => {
+  const result = await runTrackedJob(stored, async (hooks) => {
     appendLogLine(logFile, `Invoking Claude ${stored.mode}.`);
     return runClaudePrintJob(workspaceRoot, stored.request, {
       env,
+      // Background workers are themselves process-group leaders; Claude stays attached.
+      // Foreground companions detach Claude on POSIX and persist the child identity for cancel.
       detached: backgroundWorker ? false : undefined,
       gitBefore: stored.request.gitBefore,
       readGitStatus: () => readGitStatus(workspaceRoot),
-      onProgress: (event) => appendLogLine(logFile, event.logBody ?? event.message)
+      onProgress: (event) => appendLogLine(logFile, event.logBody ?? event.message),
+      onSpawn: backgroundWorker
+        ? undefined
+        : (processRecord) => {
+          hooks.updateProcess(processRecord);
+        }
     });
-  }, { processGroup: backgroundWorker });
+  }, { processGroup: backgroundWorker, trackChildProcess: !backgroundWorker });
   return result;
 }
 
@@ -395,23 +402,79 @@ async function handleRouted(mode, argv) {
     contextPack,
     logFile
   };
-  upsertJob(workspaceRoot, job);
-  writeJobFile(workspaceRoot, jobId, job);
+  const created = transitionJob(workspaceRoot, jobId, (current) => {
+    if (current && (current.status === "cancelled" || isCancelInProgress(current) || TERMINAL_JOB_STATUSES.has(current.status))) {
+      return { apply: false, reason: "exists-terminal", job: current };
+    }
+    return {
+      apply: true,
+      reason: "create-queued",
+      job: {
+        ...(current ?? {}),
+        ...job
+      }
+    };
+  });
+  if (!created.applied) {
+    throw new Error(`Unable to create job ${jobId}: ${created.reason}`);
+  }
 
   if (options.background) {
     const processRecord = spawnDetached(process.execPath, [SCRIPT, "run-job", "--cwd", workspaceRoot, jobId], {
       cwd: workspaceRoot,
       env: { ...process.env, CLAUDE_ROUTER_BACKGROUND: "1" }
     });
-    const backgroundJob = { ...job, status: "running", phase: "background", pid: processRecord.pid, processStartTime: processRecord.processStartTime, processGroup: processRecord.processGroup };
-    upsertJob(workspaceRoot, backgroundJob);
-    writeJobFile(workspaceRoot, jobId, backgroundJob);
-    output(options.json ? backgroundJob : renderStartedJob(backgroundJob), Boolean(options.json));
+    const transition = transitionJob(workspaceRoot, jobId, (current) => {
+      if (!current) {
+        return { apply: false, reason: "missing" };
+      }
+      if (current.status === "cancelled" || isCancelInProgress(current) || TERMINAL_JOB_STATUSES.has(current.status)) {
+        return {
+          apply: false,
+          reason: current.status === "cancelled" || isCancelInProgress(current) ? "cancelled" : "terminal",
+          job: current
+        };
+      }
+      return {
+        apply: true,
+        reason: "background-running",
+        job: {
+          ...current,
+          status: "running",
+          phase: "background",
+          pid: processRecord.pid,
+          processStartTime: processRecord.processStartTime,
+          processGroup: processRecord.processGroup
+        }
+      };
+    });
+    if (!transition.applied) {
+      await terminateProcessTree(processRecord, {
+        allowUnverified: true,
+        stopGraceMs: 200,
+        hardTimeoutMs: 2000,
+        pollIntervalMs: 25
+      });
+      if (transition.job?.status === "cancelled" || isCancelInProgress(transition.job)) {
+        const cancelled = cancelledJobResult(transition.job);
+        output(options.json ? cancelled : `Cancelled Claude Router job ${cancelled.id}.\n`, Boolean(options.json));
+        return;
+      }
+      throw new Error(`Unable to record background job ${jobId}: ${transition.reason}`);
+    }
+    output(options.json ? transition.job : renderStartedJob(transition.job), Boolean(options.json));
     return;
   }
 
   const completed = await runStoredJob(workspaceRoot, jobId);
-  output(options.json ? completed : completed.rendered, Boolean(options.json));
+  if (options.json) {
+    output(completed, true);
+    return;
+  }
+  const rendered = completed.rendered
+    ?? (completed.status === "cancelled" ? `Cancelled Claude Router job ${completed.id}.\n` : null)
+    ?? `# Claude Job ${completed.status}\n\nJob ${completed.id} finished with status ${completed.status}.\n`;
+  output(rendered, false);
 }
 
 async function handleRunJob(argv) {

@@ -119,6 +119,7 @@ export function splitRawArgumentString(raw) {
   let current = "";
   let quote = null;
   let escaping = false;
+  let sawQuotedEmpty = false;
 
   for (const character of String(raw ?? "")) {
     if (escaping) {
@@ -133,8 +134,11 @@ export function splitRawArgumentString(raw) {
     if (quote) {
       if (character === quote) {
         quote = null;
+        // Preserve empty quoted values such as --tools "".
+        sawQuotedEmpty = current.length === 0;
       } else {
         current += character;
+        sawQuotedEmpty = false;
       }
       continue;
     }
@@ -143,19 +147,21 @@ export function splitRawArgumentString(raw) {
       continue;
     }
     if (/\s/.test(character)) {
-      if (current) {
+      if (current || sawQuotedEmpty) {
         tokens.push(current);
         current = "";
+        sawQuotedEmpty = false;
       }
       continue;
     }
     current += character;
+    sawQuotedEmpty = false;
   }
 
   if (escaping) {
     current += "\\";
   }
-  if (current) {
+  if (current || sawQuotedEmpty) {
     tokens.push(current);
   }
   return tokens;

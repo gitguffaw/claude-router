@@ -63,6 +63,24 @@ function appendRepeatable(args, flag, values) {
   }
 }
 
+// --tools "" is a deliberate Claude security control (disable built-in tools).
+// Preserve an explicit empty string as the two argv entries: --tools, "".
+function appendTools(args, values) {
+  if (values === "") {
+    args.push("--tools", "");
+    return;
+  }
+  if (Array.isArray(values)) {
+    for (const value of values) {
+      args.push("--tools", String(value));
+    }
+    return;
+  }
+  if (values !== null && values !== undefined && values !== false) {
+    args.push("--tools", String(values));
+  }
+}
+
 function appendValue(args, flag, value) {
   if (value !== null && value !== undefined && value !== false && value !== "") {
     args.push(flag, String(value));
@@ -98,7 +116,7 @@ export function buildClaudePrintArgs(request) {
   appendValue(args, "--agents", controls.agents);
   appendRepeatable(args, "--allowedTools", controls.allowedTools);
   appendRepeatable(args, "--disallowedTools", controls.disallowedTools);
-  appendRepeatable(args, "--tools", controls.tools);
+  appendTools(args, controls.tools);
   appendValue(args, "--append-system-prompt", controls.appendSystemPrompt);
   appendBoolean(args, "--ax-screen-reader", controls.axScreenReader);
   appendRepeatable(args, "--betas", controls.betas);
@@ -148,9 +166,42 @@ export async function runClaudePrintJob(cwd, request, options = {}) {
     env: options.env ?? process.env,
     timeoutMs,
     detached: options.detached,
+    onSpawn: options.onSpawn,
     onStdout: (chunk) => options.onProgress?.({ message: "Claude stdout", logBody: chunk }),
     onStderr: (chunk) => options.onProgress?.({ message: chunk.trim(), logBody: chunk })
   });
+  if (result.trackingFailed) {
+    const message = result.trackingError instanceof Error
+      ? result.trackingError.message
+      : String(result.trackingError ?? "Failed to persist Claude process identity.");
+    const processGone = Boolean(result.processGone);
+    const warning = processGone
+      ? "Claude process tracking failed; child process tree was terminated."
+      : "Claude process tracking failed; child process tree could not be confirmed terminated.";
+    return {
+      exitStatus: 1,
+      jobStatus: "failed",
+      payload: {
+        mode: request.mode,
+        workflow: request.workflow,
+        command: "claude",
+        args,
+        timedOut: false,
+        signal: result.signal,
+        rawOutput: "",
+        parsedOutput: null,
+        stderr: message,
+        trackingFailed: true,
+        processGone,
+        pid: result.pid ?? null,
+        verification: result.verification ?? null,
+        gitAfter: options.readGitStatus?.()
+      },
+      warnings: [warning],
+      rendered: `# Claude Job Failed\n\n${message}\n`,
+      claudeSessionId: null
+    };
+  }
   const rawOutput = result.stdout.trim();
   const parsed = parseJsonOrNull(rawOutput);
   const gitAfter = options.readGitStatus?.();

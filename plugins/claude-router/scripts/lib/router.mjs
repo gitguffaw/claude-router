@@ -25,6 +25,33 @@ function rejectDangerous(options) {
   }
 }
 
+function resolvePermissionMode(mode, config, options, controls) {
+  const requested = controls.permissionMode ?? null;
+  const explicitMode = options["permission-mode"];
+  const explicitBypass =
+    Boolean(options["dangerously-skip-permissions"]) ||
+    Boolean(options["bypass-permissions"]) ||
+    Boolean(options["allow-dangerously-skip-permissions"]) ||
+    explicitMode === "bypassPermissions";
+
+  if (!config.write) {
+    // Read-only routes are least-privilege: plan only. Never silent-downgrade.
+    const nonPlanMode = requested && requested !== "plan";
+    const nonPlanExplicit = explicitMode != null && explicitMode !== "" && explicitMode !== "plan";
+    if (nonPlanMode || nonPlanExplicit || explicitBypass) {
+      throw new Error(
+        `Claude Router mode "${mode}" is read-only and requires --permission-mode plan. ` +
+          "Write-capable modes such as acceptEdits or bypassPermissions are not allowed" +
+          (options["allow-dangerous"] ? " even with --allow-dangerous" : "") +
+          ". Use exec for write-capable work."
+      );
+    }
+    return "plan";
+  }
+
+  return requested ?? config.defaultPermissionMode;
+}
+
 function rejectUnsupportedReviewTargeting(mode, options) {
   if (options.base || options.scope) {
     throw new Error("Claude Router does not yet support --base or --scope target selection for routed modes. Include the desired target in the prompt, or use raw Claude CLI/git context explicitly.");
@@ -75,7 +102,7 @@ export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = nul
   rejectUnsupportedReviewTargeting(mode, options);
   requirePrompt(prompt);
   const controls = resolveClaudeControls(options);
-  const permissionMode = controls.permissionMode ?? config.defaultPermissionMode;
+  const permissionMode = resolvePermissionMode(mode, config, options, controls);
   const outputFormat = controls.outputFormat ?? config.outputFormat;
   const routedPrompt = buildPrompt(mode, prompt, controls);
   return {

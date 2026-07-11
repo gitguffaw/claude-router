@@ -49,7 +49,8 @@ export function resolveClaudeControls(options = {}) {
     agents: options.agents || null,
     allowedTools: options["allowed-tools"] ?? [],
     disallowedTools: options["disallowed-tools"] ?? [],
-    tools: options.tools ?? [],
+    // Preserve explicit empty string for --tools "" (disable all built-in tools).
+    tools: options.tools === "" ? "" : (options.tools ?? []),
     appendSystemPrompt: options["append-system-prompt"] || null,
     axScreenReader: Boolean(options["ax-screen-reader"]),
     betas: options.betas ?? [],

@@ -6,7 +6,13 @@ import process from "node:process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { MCP_TOOLS, ROUTED_COMMAND_NAMES } from "./lib/router-commands.mjs";
-import { ROUTED_BOOLEAN_CONTROLS, ROUTED_OPTIONAL_VALUE_CONTROLS, ROUTED_VALUE_CONTROLS, routedFlagEntries, routedInputSchemaProperties } from "./lib/routed-controls.mjs";
+import {
+  MCP_ROUTED_BOOLEAN_CONTROLS,
+  MCP_ROUTED_OPTIONAL_VALUE_CONTROLS,
+  MCP_ROUTED_VALUE_CONTROLS,
+  routedFlagEntries,
+  routedInputSchemaProperties
+} from "./lib/routed-controls.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const COMPANION = path.join(ROOT, "scripts", "claude-companion.mjs");
@@ -14,14 +20,26 @@ const PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin
 
 const tools = MCP_TOOLS;
 const ROUTED_COMMANDS = ROUTED_COMMAND_NAMES;
-const VALUE_FLAGS = routedFlagEntries(ROUTED_VALUE_CONTROLS);
-const OPTIONAL_VALUE_FLAGS = routedFlagEntries(ROUTED_OPTIONAL_VALUE_CONTROLS);
-const BOOLEAN_FLAGS = routedFlagEntries(ROUTED_BOOLEAN_CONTROLS);
+const VALUE_FLAGS = routedFlagEntries(MCP_ROUTED_VALUE_CONTROLS);
+const OPTIONAL_VALUE_FLAGS = routedFlagEntries(MCP_ROUTED_OPTIONAL_VALUE_CONTROLS);
+const BOOLEAN_FLAGS = routedFlagEntries(MCP_ROUTED_BOOLEAN_CONTROLS);
 
-function schemaFor(tool) {
+// JSON-RPC 2.0 invalid params.
+const INVALID_PARAMS = -32602;
+
+export class InvalidParamsError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "InvalidParamsError";
+    this.code = INVALID_PARAMS;
+  }
+}
+
+export function schemaFor(tool) {
   const properties = {
     cwd: { type: "string" }
   };
+  let required = [];
   if (tool.command === "models") {
     return {
       type: "object",
@@ -42,14 +60,20 @@ function schemaFor(tool) {
     };
   }
   if (ROUTED_COMMANDS.has(tool.command)) {
-    Object.assign(properties, routedInputSchemaProperties(), { prompt: { type: "string" } });
+    Object.assign(
+      properties,
+      routedInputSchemaProperties({ mcpOnly: true, command: tool.command }),
+      { prompt: { type: "string" } }
+    );
+    required = tool.prompt ? ["prompt"] : [];
   } else if (tool.command === "raw") {
     Object.assign(properties, {
       args: { type: "array", items: { type: "string" } },
-      timeout_ms: { type: "number" },
+      timeout_ms: { type: "number", minimum: 0 },
       allow_mutating: { type: "boolean" },
       allow_dangerous: { type: "boolean" }
     });
+    required = ["args"];
   } else if (tool.command === "help") {
     properties.args = { type: "array", items: { type: "string" } };
   } else if (tool.command === "status") {
@@ -57,11 +81,14 @@ function schemaFor(tool) {
       job_id: { type: "string" },
       wait: { type: "boolean" },
       all: { type: "boolean" },
-      timeout_ms: { type: "number" },
-      poll_interval_ms: { type: "number" }
+      timeout_ms: { type: "number", minimum: 0 },
+      poll_interval_ms: { type: "number", minimum: 0 }
     });
-  } else if (tool.command === "result" || tool.command === "cancel") {
+  } else if (tool.command === "result") {
     properties.job_id = { type: "string" };
+  } else if (tool.command === "cancel") {
+    properties.job_id = { type: "string" };
+    required = ["job_id"];
   } else if (tool.command === "ultrareview") {
     Object.assign(properties, {
       target: { type: "string" },
@@ -70,10 +97,98 @@ function schemaFor(tool) {
   }
   return {
     type: "object",
-    additionalProperties: true,
+    additionalProperties: false,
     properties,
-    required: tool.command === "raw" ? ["args"] : tool.prompt ? ["prompt"] : []
+    required
   };
+}
+
+function typeName(value) {
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  return typeof value;
+}
+
+export function validateAgainstSchema(schema, value, path = "arguments") {
+  if (!schema || typeof schema !== "object") {
+    return;
+  }
+  if (schema.oneOf) {
+    const errors = [];
+    for (const variant of schema.oneOf) {
+      try {
+        validateAgainstSchema(variant, value, path);
+        return;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    throw new InvalidParamsError(`${path} does not match any allowed schema variant`);
+  }
+  if (schema.type === "object") {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      throw new InvalidParamsError(`${path} must be an object`);
+    }
+    for (const key of schema.required ?? []) {
+      if (value[key] === undefined) {
+        throw new InvalidParamsError(`Missing required property "${key}"`);
+      }
+    }
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(value)) {
+        if (!Object.prototype.hasOwnProperty.call(schema.properties ?? {}, key)) {
+          throw new InvalidParamsError(`Unknown property "${key}"`);
+        }
+      }
+    }
+    for (const [key, propSchema] of Object.entries(schema.properties ?? {})) {
+      if (value[key] !== undefined) {
+        validateAgainstSchema(propSchema, value[key], path === "arguments" ? key : `${path}.${key}`);
+      }
+    }
+    return;
+  }
+  if (schema.type === "array") {
+    if (!Array.isArray(value)) {
+      throw new InvalidParamsError(`${path} must be an array (got ${typeName(value)})`);
+    }
+    if (schema.items) {
+      value.forEach((item, index) => {
+        validateAgainstSchema(schema.items, item, `${path}[${index}]`);
+      });
+    }
+    return;
+  }
+  if (schema.type === "string") {
+    if (typeof value !== "string") {
+      throw new InvalidParamsError(`${path} must be a string (got ${typeName(value)})`);
+    }
+    if (schema.enum && !schema.enum.includes(value)) {
+      throw new InvalidParamsError(`${path} must be one of: ${schema.enum.join(", ")}`);
+    }
+    return;
+  }
+  if (schema.type === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new InvalidParamsError(`${path} must be a finite number (got ${typeName(value)})`);
+    }
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      throw new InvalidParamsError(`${path} must be >= ${schema.minimum}`);
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      throw new InvalidParamsError(`${path} must be <= ${schema.maximum}`);
+    }
+    return;
+  }
+  if (schema.type === "boolean") {
+    if (typeof value !== "boolean") {
+      throw new InvalidParamsError(`${path} must be a boolean (got ${typeName(value)})`);
+    }
+  }
 }
 
 function firstDefined(input, keys) {
@@ -86,6 +201,25 @@ function firstDefined(input, keys) {
 }
 
 function appendValue(args, input, flag, keys) {
+  // Control-specific: --tools "" disables all built-in tools and must be preserved.
+  if (flag === "--tools") {
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(input, key)) {
+        continue;
+      }
+      const raw = input[key];
+      if (raw === "") {
+        args.push(flag, "");
+        return;
+      }
+      if (Array.isArray(raw)) {
+        for (const item of raw) {
+          args.push(flag, String(item));
+        }
+        return;
+      }
+    }
+  }
   const value = firstDefined(input, keys);
   if (value === undefined || value === "") {
     return;
@@ -129,14 +263,18 @@ function callTool(name, input = {}) {
   if (!tool) {
     throw new Error(`Unknown tool ${name}`);
   }
+  validateAgainstSchema(schemaFor(tool), input ?? {});
   const args = [COMPANION, tool.command, "--json"];
   if (input.cwd) {
     args.push("--cwd", input.cwd);
   }
   if (ROUTED_COMMANDS.has(tool.command)) {
     appendRoutedFlags(args, input);
-  }
-  if (tool.command === "raw") {
+    // Argument boundary: every MCP prompt is data, including strings that begin with dashes.
+    if (input.prompt !== undefined && input.prompt !== null) {
+      args.push("--", String(input.prompt));
+    }
+  } else if (tool.command === "raw") {
     if (input.timeout_ms !== undefined && input.timeout_ms !== null) {
       args.push("--timeout-ms", String(input.timeout_ms));
     }
@@ -182,9 +320,6 @@ function callTool(name, input = {}) {
   } else if (input.job_id) {
     args.push(input.job_id);
   }
-  if (input.prompt) {
-    args.push(input.prompt);
-  }
   const result = spawnSync(process.execPath, args, {
     cwd: input.cwd || ROOT,
     env: process.env,
@@ -221,7 +356,15 @@ function handleRequest(message) {
       const output = callTool(message.params?.name, message.params?.arguments ?? {});
       send({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: output }] } });
     } catch (error) {
-      send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: error instanceof Error ? error.message : String(error) } });
+      const code = error && typeof error === "object" && error.code === INVALID_PARAMS ? INVALID_PARAMS : -32000;
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: {
+          code,
+          message: error instanceof Error ? error.message : String(error)
+        }
+      });
     }
     return;
   }
@@ -230,14 +373,17 @@ function handleRequest(message) {
   }
 }
 
-const rl = readline.createInterface({ input: process.stdin });
-rl.on("line", (line) => {
-  if (!line.trim()) {
-    return;
-  }
-  try {
-    handleRequest(JSON.parse(line));
-  } catch (error) {
-    send({ jsonrpc: "2.0", error: { code: -32700, message: error instanceof Error ? error.message : String(error) } });
-  }
-});
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const rl = readline.createInterface({ input: process.stdin });
+  rl.on("line", (line) => {
+    if (!line.trim()) {
+      return;
+    }
+    try {
+      handleRequest(JSON.parse(line));
+    } catch (error) {
+      send({ jsonrpc: "2.0", error: { code: -32700, message: error instanceof Error ? error.message : String(error) } });
+    }
+  });
+}

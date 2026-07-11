@@ -34,7 +34,6 @@ const VALUE_FLAGS = new Set([
   "disallowed-tools",
   "disallowedTools",
   "effort",
-  "exclude-dynamic-system-prompt-sections",
   "fallback-model",
   "file",
   "from-pr",
@@ -61,7 +60,6 @@ const VALUE_FLAGS = new Set([
   "settings",
   "session-id",
   "system-prompt",
-  "tmux",
   "tools",
   "transport",
   "worktree"
@@ -84,6 +82,7 @@ const BOOLEAN_FLAGS = new Set([
   "debug",
   "disable-slash-commands",
   "dry-run",
+  "exclude-dynamic-system-prompt-sections",
   "fork-session",
   "help",
   "ide",
@@ -101,6 +100,8 @@ const BOOLEAN_FLAGS = new Set([
   "search",
   "sonnet",
   "strict-mcp-config",
+  // Bare boolean; Claude accepts the special inline spelling --tmux=classic.
+  "tmux",
   "ultrathink",
   "verbose",
   "version"
@@ -257,6 +258,8 @@ function parseFlag(tokens, index, options) {
     return { flag, nextIndex: inlineValue === undefined && flag.value !== null ? index + 2 : index + 1, unknown: false };
   }
   if (isBoolean) {
+    // Bare boolean flags never consume the next token. Inline forms such as
+    // --tmux=classic remain single tokens and do not hide the real command path.
     flag.value = inlineValue === undefined ? true : inlineValue !== "false";
     return { flag, nextIndex: index + 1, unknown: false };
   }

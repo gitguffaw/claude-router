@@ -1,27 +1,49 @@
+import { PERMISSION_MODES } from "./model-catalog.mjs";
+
 const STRING_SCHEMA = { type: "string" };
 const BOOLEAN_SCHEMA = { type: "boolean" };
+const NONNEGATIVE_NUMBER_SCHEMA = { type: "number", minimum: 0 };
 const STRING_OR_STRING_ARRAY_SCHEMA = { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] };
 const BOOLEAN_OR_STRING_SCHEMA = { oneOf: [{ type: "boolean" }, { type: "string" }] };
+
+export const READ_ONLY_ROUTED_COMMANDS = new Set(["analyze", "plan", "review", "adversarial-review"]);
+export const READ_ONLY_PERMISSION_MODES = ["plan"];
+export const WRITE_CAPABLE_PERMISSION_MODES = PERMISSION_MODES.map((mode) => mode.flag_value);
 
 function defaultInputKeys(option) {
   const snake = option.replaceAll("-", "_");
   return [...new Set([snake, option])];
 }
 
-function control({ flag, option = flag.slice(2), optionAliases = [], inputKeys, schema = STRING_SCHEMA, repeatable = false }) {
+function control({
+  flag,
+  option = flag.slice(2),
+  optionAliases = [],
+  inputKeys,
+  schema = STRING_SCHEMA,
+  repeatable = false,
+  // When false, control remains available on the CLI for clear rejection messages
+  // but is omitted from MCP schemas so clients cannot advertise unsupported inputs.
+  mcp = true,
+  // When true, omit from MCP schemas for read-only routed commands (Finding 4 boundary).
+  mcpOmitReadOnly = false
+}) {
   return {
     flag,
     option,
     optionAliases,
     inputKeys: inputKeys ?? defaultInputKeys(option),
     schema,
-    repeatable
+    repeatable,
+    mcp,
+    mcpOmitReadOnly
   };
 }
 
 export const ROUTED_VALUE_CONTROLS = [
-  control({ flag: "--base" }),
-  control({ flag: "--timeout-ms", schema: { type: "number" } }),
+  // Always rejected by router.mjs — keep on CLI only for clear error messages.
+  control({ flag: "--base", mcp: false }),
+  control({ flag: "--timeout-ms", schema: NONNEGATIVE_NUMBER_SCHEMA }),
   control({ flag: "--model" }),
   control({ flag: "--effort" }),
   control({ flag: "--permission-mode" }),
@@ -31,7 +53,7 @@ export const ROUTED_VALUE_CONTROLS = [
   control({ flag: "--settings" }),
   control({ flag: "--setting-sources" }),
   control({ flag: "--add-dir", schema: STRING_OR_STRING_ARRAY_SCHEMA, repeatable: true }),
-  control({ flag: "--scope" }),
+  control({ flag: "--scope", mcp: false }),
   control({ flag: "--agent" }),
   control({ flag: "--agents" }),
   control({ flag: "--allowed-tools", schema: STRING_OR_STRING_ARRAY_SCHEMA, repeatable: true }),
@@ -78,12 +100,21 @@ export const ROUTED_BOOLEAN_CONTROLS = [
     flag: "--dangerously-skip-permissions",
     optionAliases: ["bypass-permissions"],
     inputKeys: ["dangerously_skip_permissions", "dangerously-skip-permissions", "bypass_permissions", "bypass-permissions"],
-    schema: BOOLEAN_SCHEMA
+    schema: BOOLEAN_SCHEMA,
+    // Always rejected on read-only routes (Finding 4); keep for exec only on MCP.
+    mcpOmitReadOnly: true
   }),
-  control({ flag: "--allow-dangerous", schema: BOOLEAN_SCHEMA }),
-  control({ flag: "--allow-dangerously-skip-permissions", schema: BOOLEAN_SCHEMA }),
-  control({ flag: "--search", schema: BOOLEAN_SCHEMA }),
-  control({ flag: "--web-search", optionAliases: ["webSearch"], inputKeys: ["web_search", "web-search", "webSearch"], schema: BOOLEAN_SCHEMA }),
+  control({ flag: "--allow-dangerous", schema: BOOLEAN_SCHEMA, mcpOmitReadOnly: true }),
+  control({ flag: "--allow-dangerously-skip-permissions", schema: BOOLEAN_SCHEMA, mcpOmitReadOnly: true }),
+  // Always rejected by router.mjs — keep on CLI only for clear error messages.
+  control({ flag: "--search", schema: BOOLEAN_SCHEMA, mcp: false }),
+  control({
+    flag: "--web-search",
+    optionAliases: ["webSearch"],
+    inputKeys: ["web_search", "web-search", "webSearch"],
+    schema: BOOLEAN_SCHEMA,
+    mcp: false
+  }),
   control({ flag: "--ax-screen-reader", schema: BOOLEAN_SCHEMA }),
   control({ flag: "--brief", schema: BOOLEAN_SCHEMA }),
   control({ flag: "--continue", schema: BOOLEAN_SCHEMA }),
@@ -104,16 +135,37 @@ export const ROUTED_OPTIONAL_VALUE_OPTIONS = ROUTED_OPTIONAL_VALUE_CONTROLS.map(
 export const ROUTED_BOOLEAN_OPTIONS = ROUTED_BOOLEAN_CONTROLS.flatMap((item) => [item.option, ...item.optionAliases]);
 export const ROUTED_REPEATABLE_OPTIONS = ROUTED_VALUE_CONTROLS.filter((item) => item.repeatable).map((item) => item.option);
 
+export const MCP_ROUTED_VALUE_CONTROLS = ROUTED_VALUE_CONTROLS.filter((item) => item.mcp !== false);
+export const MCP_ROUTED_OPTIONAL_VALUE_CONTROLS = ROUTED_OPTIONAL_VALUE_CONTROLS.filter((item) => item.mcp !== false);
+export const MCP_ROUTED_BOOLEAN_CONTROLS = ROUTED_BOOLEAN_CONTROLS.filter((item) => item.mcp !== false);
+
 export function routedFlagEntries(controls) {
   return controls.map((item) => [item.flag, ...item.inputKeys]);
 }
 
-export function routedInputSchemaProperties({ includeAliases = false } = {}) {
+function permissionModeSchemaForCommand(command) {
+  if (command && READ_ONLY_ROUTED_COMMANDS.has(command)) {
+    return { type: "string", enum: [...READ_ONLY_PERMISSION_MODES] };
+  }
+  return { type: "string", enum: [...WRITE_CAPABLE_PERMISSION_MODES] };
+}
+
+export function routedInputSchemaProperties({ includeAliases = false, command = null, mcpOnly = false } = {}) {
+  const controls = mcpOnly
+    ? [...MCP_ROUTED_VALUE_CONTROLS, ...MCP_ROUTED_OPTIONAL_VALUE_CONTROLS, ...MCP_ROUTED_BOOLEAN_CONTROLS]
+    : [...ROUTED_VALUE_CONTROLS, ...ROUTED_OPTIONAL_VALUE_CONTROLS, ...ROUTED_BOOLEAN_CONTROLS];
+  const readOnly = Boolean(command && READ_ONLY_ROUTED_COMMANDS.has(command));
   const properties = {};
-  for (const item of [...ROUTED_VALUE_CONTROLS, ...ROUTED_OPTIONAL_VALUE_CONTROLS, ...ROUTED_BOOLEAN_CONTROLS]) {
+  for (const item of controls) {
+    if (mcpOnly && item.mcpOmitReadOnly && readOnly) {
+      continue;
+    }
     const keys = includeAliases ? item.inputKeys : [item.inputKeys[0]];
+    const schema = item.option === "permission-mode"
+      ? permissionModeSchemaForCommand(command)
+      : item.schema;
     for (const key of keys) {
-      properties[key] = item.schema;
+      properties[key] = schema;
     }
   }
   return properties;

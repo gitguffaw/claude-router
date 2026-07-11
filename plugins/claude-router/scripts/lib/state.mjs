@@ -2,12 +2,17 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { buildProcessRecord, getProcessStartTime } from "./process.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
 
 const STATE_VERSION = 1;
 const MAX_JOBS = 50;
 const STATE_FILE_NAME = "state.json";
+const LOCK_FILE_NAME = "state.lock";
 const JOBS_DIR_NAME = "jobs";
+const DEFAULT_LOCK_TIMEOUT_MS = 5000;
+const DEFAULT_LOCK_STALE_MS = 10000;
+const LOCK_POLL_MS = 15;
 
 function nowIso() {
   return new Date().toISOString();
@@ -37,6 +42,10 @@ export function resolveJobsDir(cwd) {
 
 export function resolveStateFile(cwd) {
   return path.join(resolveStateDir(cwd), STATE_FILE_NAME);
+}
+
+export function resolveLockFile(cwd) {
+  return path.join(resolveStateDir(cwd), LOCK_FILE_NAME);
 }
 
 export function resolveJobFile(cwd, jobId) {
@@ -87,26 +96,195 @@ function writeJsonAtomic(file, payload) {
   fs.renameSync(tempFile, file);
 }
 
-export function saveState(cwd, state) {
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function positiveIntEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 1) {
+    return fallback;
+  }
+  return Math.floor(value);
+}
+
+function lockTimeoutMs() {
+  return positiveIntEnv("CLAUDE_ROUTER_STATE_LOCK_TIMEOUT_MS", DEFAULT_LOCK_TIMEOUT_MS);
+}
+
+function lockStaleMs() {
+  return positiveIntEnv("CLAUDE_ROUTER_STATE_LOCK_STALE_MS", DEFAULT_LOCK_STALE_MS);
+}
+
+function readLockMeta(lockFile) {
+  try {
+    return JSON.parse(fs.readFileSync(lockFile, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but is not signalable by this user.
+    return Boolean(error && error.code === "EPERM");
+  }
+}
+
+function lockOwnerStatus(meta) {
+  const pid = Number(meta?.pid);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return { hasOwner: false, live: false };
+  }
+  // Baseline owner existence is portable (including Windows). Start-time identity
+  // is optional reuse detection where available; never treat lookup failure as dead.
+  if (!isProcessAlive(pid)) {
+    return { hasOwner: true, live: false };
+  }
+
+  const expectedStart = meta.processStartTime ?? null;
+  if (expectedStart) {
+    const currentStart = getProcessStartTime(pid);
+    if (currentStart && currentStart !== expectedStart) {
+      return { hasOwner: true, live: false };
+    }
+    // Missing/unavailable current start identity (Windows, transient ps failure):
+    // fail safe and keep treating the existing PID as live.
+  }
+  return { hasOwner: true, live: true };
+}
+
+function isLockStale(lockFile, staleMs) {
+  const now = Date.now();
+  const meta = readLockMeta(lockFile);
+  if (meta) {
+    const owner = lockOwnerStatus(meta);
+    if (owner.hasOwner) {
+      // Live ownership always wins over createdAt/mtime age.
+      return !owner.live;
+    }
+  }
+
+  // Age/mtime only recovers malformed, missing-owner, or unverifiable abandoned locks.
+  const createdAt = Number(meta?.createdAt);
+  if (Number.isFinite(createdAt) && now - createdAt >= staleMs) {
+    return true;
+  }
+  try {
+    const stat = fs.statSync(lockFile);
+    if (now - stat.mtimeMs >= staleMs) {
+      return true;
+    }
+  } catch {
+    return true;
+  }
+  return false;
+}
+
+function tryAcquireLock(lockFile, identity) {
+  const payload = `${JSON.stringify({
+    pid: identity.pid,
+    processStartTime: identity.processStartTime,
+    createdAt: Date.now()
+  })}\n`;
+  try {
+    fs.writeFileSync(lockFile, payload, { flag: "wx", encoding: "utf8", mode: 0o600 });
+    return true;
+  } catch (error) {
+    if (error && error.code === "EEXIST") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function releaseLock(lockFile) {
+  try {
+    const meta = readLockMeta(lockFile);
+    if (meta && Number(meta.pid) !== process.pid) {
+      return;
+    }
+    fs.unlinkSync(lockFile);
+  } catch {
+    // Best-effort release; next acquirer can recover stale locks.
+  }
+}
+
+function withStateLock(cwd, fn) {
+  ensureStateDir(cwd);
+  const lockFile = resolveLockFile(cwd);
+  const timeoutMs = lockTimeoutMs();
+  const staleMs = lockStaleMs();
+  const startedAt = Date.now();
+  // Resolve holder identity once per acquisition attempt; poll retries reuse it.
+  const identity = buildProcessRecord(process.pid);
+  let acquired = false;
+
+  while (!acquired) {
+    if (tryAcquireLock(lockFile, identity)) {
+      acquired = true;
+      break;
+    }
+    if (isLockStale(lockFile, staleMs)) {
+      try {
+        fs.unlinkSync(lockFile);
+      } catch {
+        // Another process may have recovered the lock first.
+      }
+      continue;
+    }
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`Timed out after ${timeoutMs}ms waiting for Claude Router state lock at ${lockFile}`);
+    }
+    sleepMs(LOCK_POLL_MS);
+  }
+
+  try {
+    return fn();
+  } finally {
+    releaseLock(lockFile);
+  }
+}
+
+function saveStateUnlocked(cwd, state) {
+  // Load the live index under the caller-held lock so cleanup never uses a
+  // stale snapshot from before concurrent writers finished.
   const previousJobs = loadState(cwd).jobs;
   ensureStateDir(cwd);
   const nextJobs = pruneJobs(state.jobs ?? []);
-  const retained = new Set(nextJobs.map((job) => job.id));
-  for (const job of previousJobs) {
-    if (!retained.has(job.id)) {
-      removeIfExists(resolveJobFile(cwd, job.id));
-      removeIfExists(job.logFile);
-    }
-  }
+  const retained = new Set(nextJobs.map((job) => job.id).filter(Boolean));
   const nextState = { version: STATE_VERSION, config: state.config ?? {}, jobs: nextJobs };
   writeJsonAtomic(resolveStateFile(cwd), nextState);
+  for (const job of previousJobs) {
+    if (!job?.id || retained.has(job.id)) {
+      continue;
+    }
+    removeIfExists(resolveJobFile(cwd, job.id));
+    removeIfExists(job.logFile);
+  }
   return nextState;
 }
 
+export function saveState(cwd, state) {
+  return withStateLock(cwd, () => saveStateUnlocked(cwd, state));
+}
+
 export function updateState(cwd, mutate) {
-  const state = loadState(cwd);
-  mutate(state);
-  return saveState(cwd, state);
+  return withStateLock(cwd, () => {
+    const state = loadState(cwd);
+    mutate(state);
+    return saveStateUnlocked(cwd, state);
+  });
 }
 
 export function generateJobId(prefix = "claude") {
@@ -142,4 +320,81 @@ export function readJobFile(cwd, jobId) {
     return null;
   }
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function readJobRecordUnlocked(cwd, jobId) {
+  const file = resolveJobFile(cwd, jobId);
+  if (fs.existsSync(file)) {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      // Fall through to index.
+    }
+  }
+  return loadState(cwd).jobs.find((job) => job.id === jobId) ?? null;
+}
+
+/**
+ * Conditionally transition one job under the workspace state lock.
+ * decide(currentJob|null) must return:
+ *   { apply: false, reason?: string, job?: object } or
+ *   { apply: true, reason?: string, job: object }
+ * On apply, both the state index and per-job file are written before unlock.
+ */
+export function transitionJob(cwd, jobId, decide) {
+  if (!jobId) {
+    throw new Error("transitionJob requires a job id.");
+  }
+  return withStateLock(cwd, () => {
+    const state = loadState(cwd);
+    const index = state.jobs.findIndex((job) => job.id === jobId);
+    const indexJob = index >= 0 ? state.jobs[index] : null;
+    let fileJob = null;
+    const file = resolveJobFile(cwd, jobId);
+    if (fs.existsSync(file)) {
+      try {
+        fileJob = JSON.parse(fs.readFileSync(file, "utf8"));
+      } catch {
+        fileJob = null;
+      }
+    }
+    const current = fileJob ?? indexJob ?? null;
+    const decision = decide(current ? { ...current } : null) ?? { apply: false, reason: "no-decision" };
+    if (!decision.apply) {
+      return {
+        applied: false,
+        reason: decision.reason ?? "rejected",
+        job: decision.job ?? current,
+        previous: current
+      };
+    }
+    if (!decision.job || typeof decision.job !== "object") {
+      throw new Error("transitionJob apply decision requires a job object.");
+    }
+    const timestamp = nowIso();
+    const next = {
+      ...decision.job,
+      id: jobId,
+      createdAt: decision.job.createdAt ?? current?.createdAt ?? timestamp,
+      updatedAt: timestamp
+    };
+    if (index === -1) {
+      state.jobs.unshift(next);
+    } else {
+      state.jobs[index] = next;
+    }
+    ensureStateDir(cwd);
+    writeJsonAtomic(file, next);
+    saveStateUnlocked(cwd, state);
+    return {
+      applied: true,
+      reason: decision.reason ?? "applied",
+      job: next,
+      previous: current
+    };
+  });
+}
+
+export function readJobRecord(cwd, jobId) {
+  return readJobRecordUnlocked(cwd, jobId);
 }

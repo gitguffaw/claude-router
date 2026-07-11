@@ -2,9 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { buildEnv, initGitRepo, installFakeClaude, makeTempDir, run } from "./helpers.mjs";
-import { readJobFile, upsertJob, writeJobFile } from "../scripts/lib/state.mjs";
+import { listJobs, readJobFile, upsertJob, writeJobFile } from "../scripts/lib/state.mjs";
 import { handleCancel } from "../scripts/lib/job-commands.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -203,6 +204,69 @@ test("raw guardrails classify command paths after global flags and do not trust 
   }
 });
 
+test("raw guardrails do not let Claude boolean prefixes hide mutating mcp commands", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  for (const args of [
+    ["raw", "--json", "--", "--exclude-dynamic-system-prompt-sections", "mcp", "remove", "example"],
+    ["raw", "--json", "--", "--tmux", "mcp", "remove", "example"],
+    ["raw", "--json", "--", "--tmux=classic", "mcp", "remove", "example"]
+  ]) {
+    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
+    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
+    assert.match(blocked.stderr, /may mutate/);
+  }
+});
+
+test("raw guardrails do not let Claude boolean prefixes hide dangerous permission-mode", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  for (const args of [
+    ["raw", "--json", "--", "--exclude-dynamic-system-prompt-sections", "--permission-mode", "bypassPermissions", "mcp", "list"],
+    ["raw", "--json", "--", "--tmux", "--permission-mode", "bypassPermissions", "mcp", "list"],
+    ["raw", "--json", "--", "--tmux=classic", "--permission-mode", "bypassPermissions", "mcp", "list"]
+  ]) {
+    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
+    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
+    assert.match(blocked.stderr, /dangerous permission bypass/i);
+  }
+
+  const allowed = run("node", [
+    SCRIPT,
+    "raw",
+    "--json",
+    "--allow-dangerous",
+    "--",
+    "--exclude-dynamic-system-prompt-sections",
+    "--permission-mode",
+    "bypassPermissions",
+    "mcp",
+    "list"
+  ], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.equal(allowed.status, 0, allowed.stderr);
+  const allowedPayload = JSON.parse(allowed.stdout);
+  assert.equal(allowedPayload.classification.dangerous, true);
+  assert.deepEqual(allowedPayload.classification.commandPath, ["mcp", "list"]);
+});
+
+test("raw read-only invocations still work with Claude boolean prefixes", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  for (const args of [
+    ["raw", "--json", "--", "mcp", "list"],
+    ["raw", "--json", "--", "--exclude-dynamic-system-prompt-sections", "mcp", "list"],
+    ["raw", "--json", "--", "--tmux", "mcp", "list"],
+    ["raw", "--json", "--", "--tmux=classic", "mcp", "list"],
+    ["raw", "--json", "--", "mcp", "add", "--help"]
+  ]) {
+    const result = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
+    assert.equal(result.status, 0, `${args.join(" ")} should succeed: ${result.stderr}`);
+  }
+});
+
 test("raw passthrough preserves routed optional and repeatable-looking flags before --", () => {
   const bin = makeTempDir();
   const data = makeTempDir();
@@ -235,13 +299,57 @@ test("routed commands reject dangerous permission bypass spellings without route
   ]) {
     const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
     assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
-    assert.match(blocked.stderr, /Dangerous permission bypass/);
+    assert.match(blocked.stderr, /Dangerous permission bypass|read-only and requires --permission-mode plan/);
   }
 
-  const allowed = run("node", [SCRIPT, "analyze", "--json", "--allow-dangerous", "--permission-mode", "bypassPermissions", "accepted risk"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(allowed.status, 0, allowed.stderr);
-  const payload = JSON.parse(allowed.stdout);
-  assert.equal(payload.request.permissionMode, "bypassPermissions");
+  // allow-dangerous cannot override a read-only route boundary.
+  const blockedReadOnly = run("node", [
+    SCRIPT,
+    "analyze",
+    "--json",
+    "--allow-dangerous",
+    "--permission-mode",
+    "bypassPermissions",
+    "accepted risk"
+  ], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.notEqual(blockedReadOnly.status, 0);
+  assert.match(blockedReadOnly.stderr, /read-only and requires --permission-mode plan/);
+
+  const planOk = run("node", [SCRIPT, "analyze", "--json", "--permission-mode", "plan", "safe read"], {
+    cwd: ROOT,
+    env: buildEnv(bin, data)
+  });
+  assert.equal(planOk.status, 0, planOk.stderr);
+  assert.equal(JSON.parse(planOk.stdout).request.permissionMode, "plan");
+
+  const execAllowed = run("node", [
+    SCRIPT,
+    "exec",
+    "--json",
+    "--allow-dangerous",
+    "--permission-mode",
+    "bypassPermissions",
+    "accepted risk"
+  ], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.equal(execAllowed.status, 0, execAllowed.stderr);
+  assert.equal(JSON.parse(execAllowed.stdout).request.permissionMode, "bypassPermissions");
+});
+
+test("routed CLI preserves explicit empty --tools value", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const result = run("node", [SCRIPT, "analyze", "--json", "--tools", "", "inspect tools"], {
+    cwd: repo,
+    env: buildEnv(bin, data)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const args = JSON.parse(result.stdout).result.args;
+  const index = args.indexOf("--tools");
+  assert.notEqual(index, -1);
+  assert.equal(args[index + 1], "");
 });
 
 test("routed commands reject CLI-level unsupported review and web search flags", () => {
@@ -472,6 +580,8 @@ test("cancel does not mark jobs cancelled when termination cannot confirm exit",
   assert.equal(payload.status, "running");
   assert.equal(payload.phase, "cancel-failed");
   assert.equal(payload.cancelSignal.verification.matches, true);
+  assert.equal(payload.cancelRequestedAt, undefined);
+  assert.ok(payload.cancelFailedAt);
 });
 
 
@@ -611,5 +721,173 @@ test("background job can be cancelled", () => {
       // Already gone.
     }
     assert.fail(`fake Claude child ${childPid} survived background cancel`);
+  }
+});
+
+function waitForRunningJobWithPid(repo, dataDir, timeoutMs = 5000) {
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const job = listJobs(repo).find((entry) => entry.status === "running" && Number.isFinite(entry.pid));
+      if (job) {
+        return job;
+      }
+      sleep(25);
+    }
+    return null;
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+  }
+}
+
+function readStoredJobWithDataDir(repo, dataDir, jobId) {
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    return readJobFile(repo, jobId);
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
+  }
+}
+
+test("foreground job cancel kills Claude child and keeps cancelled terminal status", async () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const pidFile = path.join(data, "fake-claude-fg.pid");
+  const env = { ...buildEnv(bin, data), FAKE_CLAUDE_PID_FILE: pidFile };
+
+  const foreground = spawn(process.execPath, [SCRIPT, "analyze", "--json", "SLEEP"], {
+    cwd: repo,
+    env,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  let stderr = "";
+  foreground.stdout.setEncoding("utf8");
+  foreground.stderr.setEncoding("utf8");
+  foreground.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  foreground.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const foregroundExit = new Promise((resolve) => {
+    foreground.on("close", (code, signal) => resolve({ code, signal }));
+  });
+
+  try {
+    assert.equal(waitForFile(pidFile, 5000), true, "fake Claude child PID was not recorded");
+    const childPid = Number(fs.readFileSync(pidFile, "utf8"));
+    assert.equal(processAlive(childPid), true, "fake Claude child should be alive before cancel");
+
+    const runningJob = waitForRunningJobWithPid(repo, data, 5000);
+    assert.ok(runningJob, "foreground job with persisted Claude pid was not found");
+    assert.equal(runningJob.pid, childPid, "stored pid should be the Claude child, not only the companion");
+    if (process.platform !== "win32") {
+      assert.equal(runningJob.processGroup, true, "detached Claude child should be tracked as a process group");
+      assert.equal(typeof runningJob.processStartTime, "string");
+      assert.ok(runningJob.processStartTime.length > 0);
+    }
+
+    const cancelled = run("node", [SCRIPT, "cancel", "--json", runningJob.id], { cwd: repo, env });
+    assert.equal(cancelled.status, 0, cancelled.stderr);
+    const cancelPayload = JSON.parse(cancelled.stdout);
+    assert.equal(cancelPayload.status, "cancelled");
+
+    if (!waitForProcessExit(childPid, 5000)) {
+      try {
+        process.kill(childPid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      assert.fail(`fake Claude child ${childPid} survived foreground cancel`);
+    }
+
+    const exit = await Promise.race([
+      foregroundExit,
+      new Promise((resolve) => setTimeout(() => resolve({ code: null, signal: "timeout" }), 8000))
+    ]);
+    assert.notEqual(exit.signal, "timeout", `foreground companion did not exit after cancel: ${stderr}`);
+    assert.equal(exit.code, 0, `foreground companion exit=${exit.code} signal=${exit.signal} stderr=${stderr} stdout=${stdout}`);
+
+    const terminal = JSON.parse(stdout);
+    assert.equal(terminal.status, "cancelled", `foreground terminal payload: ${stdout}`);
+    assert.match(terminal.rendered ?? "", /cancelled/i);
+
+    const stored = readStoredJobWithDataDir(repo, data, runningJob.id);
+    assert.ok(stored, "stored job missing after foreground cancel");
+    assert.equal(stored.status, "cancelled");
+    assert.equal(stored.pid, null);
+  } finally {
+    if (!foreground.killed && foreground.exitCode === null) {
+      foreground.kill("SIGKILL");
+    }
+  }
+});
+
+test("foreground non-JSON cancel renders a cancelled terminal message", async () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const pidFile = path.join(data, "fake-claude-fg-text.pid");
+  const env = { ...buildEnv(bin, data), FAKE_CLAUDE_PID_FILE: pidFile };
+
+  const foreground = spawn(process.execPath, [SCRIPT, "analyze", "SLEEP"], {
+    cwd: repo,
+    env,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  let stderr = "";
+  foreground.stdout.setEncoding("utf8");
+  foreground.stderr.setEncoding("utf8");
+  foreground.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  foreground.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const foregroundExit = new Promise((resolve) => {
+    foreground.on("close", (code, signal) => resolve({ code, signal }));
+  });
+
+  try {
+    assert.equal(waitForFile(pidFile, 5000), true, "fake Claude child PID was not recorded");
+    const childPid = Number(fs.readFileSync(pidFile, "utf8"));
+    const runningJob = waitForRunningJobWithPid(repo, data, 5000);
+    assert.ok(runningJob, "foreground job was not found for non-JSON cancel");
+
+    const cancelled = run("node", [SCRIPT, "cancel", runningJob.id], { cwd: repo, env });
+    assert.equal(cancelled.status, 0, cancelled.stderr);
+    assert.match(cancelled.stdout, /Cancelled Claude Router job/);
+
+    assert.equal(waitForProcessExit(childPid, 5000), true, "Claude child survived non-JSON foreground cancel");
+    const exit = await Promise.race([
+      foregroundExit,
+      new Promise((resolve) => setTimeout(() => resolve({ code: null, signal: "timeout" }), 8000))
+    ]);
+    assert.notEqual(exit.signal, "timeout", `foreground companion hung: ${stderr}`);
+    assert.equal(exit.code, 0, stderr);
+    assert.match(stdout, /cancelled/i);
+    assert.equal(readStoredJobWithDataDir(repo, data, runningJob.id).status, "cancelled");
+  } finally {
+    if (!foreground.killed && foreground.exitCode === null) {
+      foreground.kill("SIGKILL");
+    }
   }
 });

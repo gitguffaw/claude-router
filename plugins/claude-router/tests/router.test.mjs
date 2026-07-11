@@ -75,6 +75,70 @@ test("unsupported web search and dangerous permissions fail clearly", () => {
   assert.throws(() => buildRouterRequest({ mode: "analyze", prompt: "x", options: { timeout: "30" } }), /use --timeout-ms/);
 });
 
+test("read-only modes reject write-capable permission modes even with allow-dangerous", () => {
+  for (const mode of ["analyze", "plan", "review", "adversarial-review"]) {
+    assert.throws(
+      () => buildRouterRequest({ mode, prompt: "x", options: { "permission-mode": "acceptEdits" } }),
+      /read-only and requires --permission-mode plan/
+    );
+    assert.throws(
+      () => buildRouterRequest({ mode, prompt: "x", options: { "permission-mode": "bypassPermissions" } }),
+      /Dangerous permission|read-only and requires --permission-mode plan/
+    );
+    assert.throws(
+      () => buildRouterRequest({
+        mode,
+        prompt: "x",
+        options: { "permission-mode": "bypassPermissions", "allow-dangerous": true }
+      }),
+      /read-only and requires --permission-mode plan/
+    );
+    assert.throws(
+      () => buildRouterRequest({
+        mode,
+        prompt: "x",
+        options: { "bypass-permissions": true, "allow-dangerous": true }
+      }),
+      /read-only and requires --permission-mode plan/
+    );
+    const ok = buildRouterRequest({ mode, prompt: "x", options: { "permission-mode": "plan" } });
+    assert.equal(ok.permissionMode, "plan");
+    assert.equal(ok.write, false);
+  }
+});
+
+test("exec retains write-capable permission modes with dangerous override", () => {
+  const accept = buildRouterRequest({ mode: "exec", prompt: "x", options: { "permission-mode": "acceptEdits" } });
+  assert.equal(accept.permissionMode, "acceptEdits");
+  const bypass = buildRouterRequest({
+    mode: "exec",
+    prompt: "x",
+    options: { "permission-mode": "bypassPermissions", "allow-dangerous": true }
+  });
+  assert.equal(bypass.permissionMode, "bypassPermissions");
+  const defaultExec = buildRouterRequest({ mode: "exec", prompt: "x", options: {} });
+  assert.equal(defaultExec.permissionMode, "acceptEdits");
+});
+
+test("explicit empty tools string is preserved as --tools and empty argv entries", () => {
+  for (const tools of ["", [""]]) {
+    const request = buildRouterRequest({ mode: "analyze", prompt: "x", options: { tools } });
+    const args = buildClaudePrintArgs(request);
+    const index = args.indexOf("--tools");
+    assert.notEqual(index, -1, "expected --tools flag");
+    assert.equal(args[index + 1], "");
+  }
+  const multi = buildClaudePrintArgs(buildRouterRequest({
+    mode: "exec",
+    prompt: "x",
+    options: { tools: ["Read", ""] }
+  }));
+  const toolsIndexes = multi.map((arg, index) => (arg === "--tools" ? index : -1)).filter((index) => index >= 0);
+  assert.equal(toolsIndexes.length, 2);
+  assert.equal(multi[toolsIndexes[0] + 1], "Read");
+  assert.equal(multi[toolsIndexes[1] + 1], "");
+});
+
 test("review target flags fail instead of pretending to scope the review", () => {
   for (const mode of ["analyze", "plan", "exec", "review", "adversarial-review"]) {
     assert.throws(() => buildRouterRequest({ mode, prompt: "x", options: { base: "main" } }), /does not yet support --base or --scope/);

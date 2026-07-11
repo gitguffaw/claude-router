@@ -39,3 +39,20 @@ test("parseArgs supports optional-value flags without consuming the only prompt"
   assert.equal(inline.options.debug, "router");
   assert.deepEqual(inline.positionals, ["inspect"]);
 });
+
+test("parseArgs preserves explicit empty tools value", () => {
+  const parsed = parseArgs(["--tools", "", "prompt"], {
+    valueOptions: ["tools"],
+    repeatableOptions: ["tools"]
+  });
+  assert.deepEqual(parsed.options.tools, [""]);
+  assert.deepEqual(parsed.positionals, ["prompt"]);
+});
+
+test("splitRawArgumentString preserves quoted empty tools value", async () => {
+  const { splitRawArgumentString } = await import("../scripts/lib/args.mjs");
+  const tokens = splitRawArgumentString('--tools "" inspect');
+  assert.deepEqual(tokens, ["--tools", "", "inspect"]);
+  const single = splitRawArgumentString("--tools '' inspect");
+  assert.deepEqual(single, ["--tools", "", "inspect"]);
+});

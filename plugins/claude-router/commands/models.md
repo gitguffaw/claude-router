@@ -1,6 +1,6 @@
 ---
-description: Show live Claude model selectors plus curated effort and permission controls
-argument-hint: '[--capability long_context|ultrathink|chrome] [--static] [--json]'
+description: Show current model examples, choices, and fields from the installed Claude CLI
+argument-hint: '[--json]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
@@ -9,6 +9,7 @@ allowed-tools: Bash(node:*)
 
 Present the full model catalog output to the user. Preserve:
 - live discovery status and Claude CLI version
+- the `documented-examples` completeness limit for model selectors
 - discovered selectors, aliases, and full names such as `fable` and `claude-fable-5`
-- curated tiers, effort levels, modifiers, permission modes, and presets
+- live CLI fields, effort and permission choices, and lean-profile availability
 - any discovery warning or error

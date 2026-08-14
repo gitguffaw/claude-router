@@ -20,8 +20,8 @@ Operate Anthropic's local `claude` CLI from Codex as a real second reasoning and
 
 ## Baseline
 
-- Verified local binary during Claude Router v2.2.3 audit: `claude 2.1.198 (Claude Code)`
-- Verified on: `2026-07-02`
+- Verified local binary during this audit: `claude 2.1.232 (Claude Code)`
+- Verified on: `2026-08-14`
 - Verified local environment: first-party Anthropic auth, `max` plan
 - Official Anthropic docs: CLI reference, commands, model config, permission modes, MCP, sub-agents, plugins, skills, hooks, Chrome, ultrareview, remote control, gateway, and platform context windows
 - Context7 may help discover Claude docs quickly, but official Anthropic docs win for volatile facts
@@ -40,32 +40,16 @@ Operate Anthropic's local `claude` CLI from Codex as a real second reasoning and
 
 ## Model Policy
 
-- `default`: clears any model override and reverts to the runtime default for the current account tier. It is not itself a model alias.
-- `best`: most capable available route, currently equivalent to `opus`.
-- `opus`: default high-capability Claude reasoning route. The backing version moves over time and can differ by provider.
-- `opus[1m]`: preferred for very large codebases or long-context synthesis when 1M context is available on the current model and plan.
-- `sonnet`: daily coding and faster execution.
-- `sonnet[1m]`: long-context Sonnet route when speed matters more than maximum capability and the current plan supports it.
-- `haiku`: fast lower-cost route. Do not assume it supports every higher-end feature.
-- `opusplan`: uses `opus` in plan mode and `sonnet` in execution. Useful when the work splits cleanly into planning and execution. Do not assume 1M planning context here.
+- Treat model selectors as an installed-CLI surface, not a policy-owned enum. Re-read `claude --help` and pass the selected value through unchanged.
+- Moving aliases such as `fable`, `opus`, and `sonnet`, full model names, context suffixes, and provider-specific mappings may change without a Claude Router release.
 - Use full model names or pinned `ANTHROPIC_DEFAULT_*_MODEL` environment variables when version stability matters more than convenience aliases.
-- Use `claude_router_models` to discover live model selectors and the current model catalog, including tier capabilities, effort levels, permission modes, and modifier flags. It returns:
-  - `discovery`: live model discovery status, Claude CLI version, selectors, aliases, full names, and any discovery error
-  - `models`: selectors accepted by the installed Claude CLI plus curated fallback selectors
-  - `tiers`: known haiku, sonnet, opus metadata — with context window, long-context support, ultrathink support, and cost tier
-  - `effort_levels`: low, medium, high, xhigh, max — with token budgets
-  - `modifiers`: router controls and Claude session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) — with tier compatibility. `--long-context` and `--ultrathink` are router-level conveniences, not native Claude CLI flags.
-  - `permission_modes`: default, acceptEdits, auto, plan, dontAsk, bypassPermissions (requires `--allow-dangerous`)
-  - `presets`: `--best` (resolves to opus)
-  - Pass `capability` (long_context, ultrathink, chrome) to filter known tiers and selectors. Unknown values are rejected.
+- Use `claude_router_models` to read the current installed surface. It returns documented model examples, every discovered top-level CLI field, current effort and permission choices, and lean-profile availability.
+- Claude help publishes model examples, not a guaranteed exhaustive registry. Do not infer that an unlisted selector is invalid or that a listed family has a fixed capability matrix.
 
 ## Effort Policy
 
-- `low`: short, latency-sensitive work.
-- `medium`: cost-sensitive work that still needs real reasoning.
-- `high`: minimum floor for intelligence-sensitive work.
-- `xhigh`: best default on Opus 4.7 for demanding coding and agentic tasks. If unsupported, Claude falls back to the highest supported level at or below the requested level.
-- `max`: deepest reasoning mode. This is the real "max think" control via `--effort max` or `/effort max`. It is session-only unless `CLAUDE_CODE_EFFORT_LEVEL` is set.
+- Treat effort values like model selectors: discover current choices from installed help and pass the requested value through.
+- Values such as `low`, `medium`, `high`, `xhigh`, and `max` are examples from the audited CLI, not a router allowlist.
 - Use `ultrathink` in the prompt for a one-turn deep-reasoning push without changing the session setting.
 
 ## Planning Policy
@@ -93,7 +77,7 @@ Operate Anthropic's local `claude` CLI from Codex as a real second reasoning and
 5. Use `--chrome` only for browser or web tasks and only when the direct Anthropic prerequisites are satisfied.
 6. Use `--agent` or `--agents` when Claude subagents or specialized roles help.
 7. Use `python3 scripts/claude_print.py` only for print-mode or machine-readable output.
-8. Use `--bare` only when the goal is reproducibility, debugging hidden state, or stripping ambient behavior.
+8. Use `--safe-mode` for minimal customizations while retaining subscription/OAuth. Use `--bare` only for API-key/provider paths because it skips OAuth and keychain reads.
 
 ## Availability Checks
 
@@ -107,7 +91,7 @@ Operate Anthropic's local `claude` CLI from Codex as a real second reasoning and
 
 ## Parity Rules
 
-- Do not default to `--bare`.
+- Do not use `--bare` on a subscription/OAuth route. Prefer router `--lean`/`--lean=oauth` or direct Claude `--safe-mode`.
 - Do not default to `-p`.
 - Treat Claude plugins, MCP servers, skills, subagents, slash commands, and session state as potentially live capabilities, but confirm auth and install state before promising them.
 - Prefer `/model`, `/effort`, `/agents`, `/help`, `/hooks`, `/resume`, `/plugin`, `/mcp`, `/chrome`, `/plan`, and `/ultraplan` inside real sessions when parity matters.

@@ -3,7 +3,7 @@
   "$id": "https://github.com/gitguffaw/claude-router/schemas/models-output.schema.json",
   "title": "Claude Router Models Catalog",
   "type": "object",
-  "required": ["catalog_version", "discovery", "models", "tiers", "effort_levels", "modifiers", "permission_modes", "presets"],
+  "required": ["catalog_version", "discovery", "models", "cli_fields", "tiers", "effort_levels", "modifiers", "permission_modes", "presets", "lean_profiles"],
   "additionalProperties": false,
   "properties": {
     "catalog_version": {
@@ -16,6 +16,10 @@
     "models": {
       "type": "array",
       "items": { "$ref": "#/$defs/ModelOption" }
+    },
+    "cli_fields": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/CliField" }
     },
     "tiers": {
       "type": "array",
@@ -36,12 +40,16 @@
     "presets": {
       "type": "array",
       "items": { "$ref": "#/$defs/Preset" }
+    },
+    "lean_profiles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/LeanProfile" }
     }
   },
   "$defs": {
     "ModelDiscovery": {
       "type": "object",
-      "required": ["status", "source", "claude_version", "selectors", "aliases", "full_names", "error"],
+      "required": ["status", "source", "claude_version", "selectors", "aliases", "full_names", "error", "completeness", "notes"],
       "additionalProperties": false,
       "properties": {
         "status": { "type": "string", "enum": ["available", "no-model-data", "not-run", "unavailable"] },
@@ -59,7 +67,9 @@
           "type": "array",
           "items": { "type": "string" }
         },
-        "error": { "type": ["string", "null"] }
+        "error": { "type": ["string", "null"] },
+        "completeness": { "type": "string", "enum": ["documented-examples"] },
+        "notes": { "type": "string" }
       }
     },
     "ModelOption": {
@@ -75,9 +85,28 @@
           "type": "array",
           "items": { "type": "string" }
         },
-        "source": { "type": "string", "enum": ["curated", "claude-help", "curated+claude-help"] },
+        "source": { "type": "string", "enum": ["claude-help"] },
         "tier": { "type": ["string", "null"] },
         "notes": { "type": "string" }
+      }
+    },
+    "CliField": {
+      "type": "object",
+      "required": ["flag", "option", "optionAliases", "inputKeys", "kind", "repeatable", "valueHint", "choices", "description", "sensitive", "dangerous", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "flag": { "type": "string" },
+        "option": { "type": "string" },
+        "optionAliases": { "type": "array", "items": { "type": "string" } },
+        "inputKeys": { "type": "array", "items": { "type": "string" } },
+        "kind": { "type": "string", "enum": ["boolean", "value", "optional-value"] },
+        "repeatable": { "type": "boolean" },
+        "valueHint": { "type": ["string", "null"] },
+        "choices": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" },
+        "sensitive": { "type": "boolean" },
+        "dangerous": { "type": "boolean" },
+        "source": { "type": "string", "enum": ["claude-help"] }
       }
     },
     "ModelTier": {
@@ -98,14 +127,15 @@
     },
     "EffortLevel": {
       "type": "object",
-      "required": ["id", "flag_value", "description", "token_budget", "recommended_for"],
+      "required": ["id", "flag_value", "description", "token_budget", "recommended_for", "source"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string" },
         "flag_value": { "type": "string", "description": "Value passed to --effort" },
         "description": { "type": "string" },
-        "token_budget": { "type": "string", "description": "Relative token budget hint" },
-        "recommended_for": { "type": "string" }
+        "token_budget": { "type": ["string", "null"], "description": "Relative token budget hint when the live CLI publishes one" },
+        "recommended_for": { "type": ["string", "null"] },
+        "source": { "type": "string", "enum": ["claude-help"] }
       }
     },
     "Modifier": {
@@ -132,14 +162,15 @@
     },
     "PermissionMode": {
       "type": "object",
-      "required": ["id", "flag_value", "description", "requires_allow_dangerous", "notes"],
+      "required": ["id", "flag_value", "description", "requires_allow_dangerous", "notes", "source"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string" },
         "flag_value": { "type": "string", "description": "Value passed to --permission-mode" },
         "description": { "type": "string" },
         "requires_allow_dangerous": { "type": "boolean", "description": "Whether this mode requires --allow-dangerous to activate" },
-        "notes": { "type": "string" }
+        "notes": { "type": "string" },
+        "source": { "type": "string", "enum": ["claude-help"] }
       }
     },
     "Preset": {
@@ -159,6 +190,19 @@
             "modifiers": { "type": "array", "items": { "type": "string" } }
           }
         },
+        "description": { "type": "string" }
+      }
+    },
+    "LeanProfile": {
+      "type": "object",
+      "required": ["id", "router_value", "isolation_flag", "auth_path", "available", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "enum": ["auto", "oauth", "api"] },
+        "router_value": { "type": "string", "enum": ["auto", "oauth", "api"] },
+        "isolation_flag": { "type": ["string", "null"] },
+        "auth_path": { "type": "string" },
+        "available": { "type": "boolean" },
         "description": { "type": "string" }
       }
     }

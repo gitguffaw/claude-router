@@ -43,7 +43,8 @@ python3 scripts/claude_print.py \
 ### 3. Control ambient state explicitly
 
 - Keep ordinary Claude behavior unless the task needs isolation.
-- Add `--bare` only when the task specifically wants to suppress plugins, hooks, memory, and `CLAUDE.md`.
+- Add `--safe-mode` when an OAuth/subscription run should suppress customizations.
+- Add `--bare` only for an API-key/provider run that should suppress ambient state; bare mode does not read OAuth or keychain credentials.
 - Add `--permission-mode`, `--settings`, `--setting-sources`, `--mcp-config`, or `--plugin-dir` only when the task needs them.
 - Pipe stdin when extra context exists; keep the prompt as the instruction.
 
@@ -60,9 +61,15 @@ python3 scripts/claude_print.py \
 claude -p --output-format json --permission-mode default \
   "Generate a release summary from CHANGELOG.md"
 
-# Isolated raw print mode
-claude -p --bare --output-format json --permission-mode default \
-  "Return a fully isolated JSON result"
+# Lean OAuth/subscription print mode
+claude -p --safe-mode --tools "Bash,Read" \
+  --system-prompt "You are a concise expert coding assistant." \
+  "Return a focused analysis"
+
+# Lean API-key print mode
+ANTHROPIC_API_KEY=... claude -p --bare --tools "Bash,Read" \
+  --system-prompt "You are a concise expert coding assistant." \
+  "Return a focused analysis"
 
 # Streaming input plus streaming output
 claude -p --input-format stream-json --output-format stream-json \

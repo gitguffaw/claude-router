@@ -35,38 +35,38 @@ Avoid: generated prompt only.
 - The AGY Host Adapter instructs AGY to invoke the Claude Router Core.
 - The Claude Router Core invokes the Claude CLI.
 - Policy Docs define routing intent; runtime code enforces deterministic behavior.
-- The Model Catalog combines live model selector discovery from the installed Claude CLI with curated metadata for stable controls exposed by host adapters.
+- The Model Catalog is rebuilt from the installed Claude CLI help. Router policy may constrain safety, but it does not own Claude's model, effort, permission, or native flag vocabulary.
 
 ## Model Catalog Language
 
 **Model Catalog**:
-The data set returned by `getModelCatalog()` and exposed through the `claude_router_models` tool and `models` companion mode. It includes live `--model` selectors parsed from installed Claude CLI help plus curated model tiers, effort levels, modifiers, permission modes, and presets.
-Avoid: treating curated tiers as the complete list of accepted model selectors.
+The data set returned by `getModelCatalog()` and exposed through the `claude_router_models` tool and `models` companion mode. It includes documented model examples, all discovered top-level CLI fields, live effort and permission choices, compatibility annotations, and lean-profile availability.
+Avoid: a static fallback catalog or any claim that router releases enumerate Claude's complete surface.
 
 **Model Selector**:
-A value accepted by Claude's `--model` flag, such as `fable`, `opus`, `sonnet`, or a full model name such as `claude-fable-5`. Selectors can appear in the live `models` catalog section even when no curated tier metadata exists yet.
-Avoid: assuming every selector has known context, cost, or capability metadata.
+A value passed to Claude's `--model` flag, such as `fable`, `opus`, `sonnet`, or a full model name such as `claude-fable-5`. Claude Router treats it as opaque and lets the installed CLI validate it.
+Avoid: an allowlist or assuming the examples in `claude --help` are exhaustive.
 
-**Model Tier**:
-One of haiku, sonnet, or opus. Each tier has a flag (e.g. `--opus`), context window, optional long-context support, and a cost tier.
-Avoid: model version, model ID (those are pinned identifiers, not router tiers).
+**Live CLI Field**:
+A top-level Claude flag parsed from the installed `claude --help`, including its aliases, value shape, current choices, and description. Managed MCP schemas incorporate these fields dynamically.
+Avoid: freezing a copied CLI flag list as the authoritative router contract.
 
 **Effort Level**:
-A reasoning-depth control passed as `--effort <level>`. Levels: low, medium, high, xhigh, max. Controls thinking token budget, not model selection.
-Avoid: model quality, model tier.
+A value passed through to `--effort`. The catalog reports the choices currently advertised by the installed CLI; it does not reject future values based on the router release.
+Avoid: fixed token-budget claims or a router-owned effort enum.
 
 **Modifier**:
-A boolean flag that shapes a Claude session without changing the model tier. Examples: `--long-context`, `--ultrathink`, `--chrome`, `--bare`. Some modifiers are tier-restricted (e.g. ultrathink requires opus).
-Avoid: model flag, tier selector.
+A native Claude field or legacy router convenience that changes session behavior without itself selecting the model. Every catalog entry labels whether its source is live Claude help or router compatibility.
+Avoid: presenting router conveniences as native Claude capabilities.
 
 **Permission Mode**:
-Controls what Claude can do during a session. Modes: default (interactive approval), plan (read-only), bypassPermissions (no approval, requires `--allow-dangerous`). Exposed in the catalog as `permission_modes` with a `requires_allow_dangerous` boolean.
-Avoid: auth mode, access level.
+Controls what Claude can do during a session. Values are discovered from installed help. Router read-only modes still force `plan`, and `bypassPermissions` still requires explicit `--allow-dangerous` consent.
+Avoid: confusing Claude's changing value vocabulary with the router's stable safety invariants.
 
-**Capability Filter**:
-An optional parameter (`capability`) on the `claude_router_models` tool and `models --capability` CLI flag. Filters known tiers and model selectors to those supporting a specific capability. Valid values: long_context, ultrathink, chrome. Unknown live selectors are omitted for tier-specific filters when support is not known.
-Avoid: model filter, tier search.
+**Lean Profile**:
+A router launch profile that reduces ambient context, tool schemas, and the core prompt while preserving the requested authentication path. `oauth` maps to Claude `--safe-mode`; `api` maps to `--bare`; `auto` detects the active path.
+Avoid: treating `--safe-mode` and `--bare` as synonyms. Bare mode does not read OAuth or keychain credentials.
 
-**Preset**:
-A shortcut flag that resolves to a fixed combination of tier, effort, and modifiers. Currently only `--best` (resolves to opus).
-Avoid: alias, model shortcut.
+**Compatibility Annotation**:
+Non-authoritative metadata retained for older tier and router-convenience concepts. It may explain a discovered selector but never adds that selector to the live model list.
+Avoid: availability claim or capability filter.

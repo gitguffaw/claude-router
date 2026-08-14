@@ -32,6 +32,71 @@ test("model and effort controls normalize", () => {
   assert.equal(request.controls.effort, "xhigh");
 });
 
+test("model and effort values are opaque pass-through strings", () => {
+  const request = buildRouterRequest({
+    mode: "analyze",
+    prompt: "x",
+    options: { model: "claude-model-from-the-future", effort: "future-depth" }
+  });
+  assert.equal(request.controls.model, "claude-model-from-the-future");
+  assert.equal(request.controls.effort, "future-depth");
+});
+
+test("lean profile selects OAuth safe mode and minimal defaults", () => {
+  const request = buildRouterRequest({
+    mode: "analyze",
+    prompt: "inspect",
+    options: { lean: true, model: "fable" },
+    runtime: {
+      auth: { loggedIn: true, authMethod: "claude.ai" },
+      env: {},
+      availableFlags: new Set(["--safe-mode", "--bare"])
+    }
+  });
+  const args = buildClaudePrintArgs(request);
+  assert.equal(request.controls.leanProfile.id, "oauth");
+  assert.ok(args.includes("--safe-mode"));
+  assert.equal(args.includes("--bare"), false);
+  assert.equal(args[args.indexOf("--tools") + 1], "Bash,Read");
+  assert.equal(args[args.indexOf("--system-prompt") + 1], "You are a concise expert coding assistant.");
+});
+
+test("lean API profile uses bare mode and respects explicit prompt and tools", () => {
+  const request = buildRouterRequest({
+    mode: "exec",
+    prompt: "implement",
+    options: { lean: "api", tools: "Read,Edit", "system-prompt": "Terse Rust expert." },
+    runtime: { env: {}, availableFlags: new Set(["--safe-mode", "--bare"]) }
+  });
+  const args = buildClaudePrintArgs(request);
+  assert.equal(request.controls.leanProfile.id, "api");
+  assert.ok(args.includes("--bare"));
+  assert.equal(args[args.indexOf("--tools") + 1], "Read,Edit");
+  assert.equal(args[args.indexOf("--system-prompt") + 1], "Terse Rust expert.");
+});
+
+test("lean auto selects bare mode only when API credentials are explicit", () => {
+  const request = buildRouterRequest({
+    mode: "analyze",
+    prompt: "inspect",
+    options: { lean: true },
+    runtime: {
+      auth: { loggedIn: true, authMethod: "claude.ai" },
+      env: { ANTHROPIC_API_KEY: "test-placeholder" },
+      availableFlags: new Set(["--safe-mode", "--bare"])
+    }
+  });
+  assert.equal(request.controls.leanProfile.id, "api");
+  assert.ok(buildClaudePrintArgs(request).includes("--bare"));
+});
+
+test("safe mode and bare mode cannot be combined", () => {
+  assert.throws(
+    () => buildRouterRequest({ mode: "exec", prompt: "x", options: { "safe-mode": true, bare: true } }),
+    /cannot be combined/
+  );
+});
+
 test("managed print jobs pass through advanced claude controls", () => {
   const request = buildRouterRequest({
     mode: "analyze",

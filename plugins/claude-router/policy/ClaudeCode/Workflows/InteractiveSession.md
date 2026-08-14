@@ -48,7 +48,7 @@ Guidance:
 
 ## 2. Preserve Normal Claude Behavior
 
-- Do not add `--bare` unless the task specifically requires isolation.
+- For isolated OAuth/subscription work use `--safe-mode`. Use `--bare` only on API-key/provider paths because it skips OAuth and keychain reads.
 - Let Claude see its ordinary plugins, MCP servers, hooks, `CLAUDE.md`, slash commands, and saved sessions.
 - Use `--agent` or `--agents` when a specialized Claude subagent topology helps.
 
@@ -101,7 +101,7 @@ Useful session commands:
 ## Notes
 
 - Interactive mode is the default when `-p` is absent.
-- `--bare` disables convenience layers and ambient Claude state. It is a debugging tool, not the default second-brain route.
+- `--safe-mode` disables customizations while preserving normal authentication. `--bare` is the API/provider minimal path and skips OAuth/keychain credentials.
 - `max` is session-only unless `CLAUDE_CODE_EFFORT_LEVEL` is set.
 - Chrome integration is beta and requires Chrome or Edge plus the Claude in Chrome extension and a direct Anthropic plan.
 - `opusplan` is the plan and execute alias, but do not assume 1M plan-mode context there.

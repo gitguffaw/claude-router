@@ -23,68 +23,84 @@ function staleJobPayload(job, verification) {
 }
 
 /**
- * Mark active jobs whose recorded process identity is gone as failed/stale-process.
+ * Reconcile one active job against its recorded process identity.
  * Foreground managed jobs (finite companionPid) skip stale-marking while the
  * companion is still alive so concurrent status cannot discard a pending runner commit.
- * Exported for tests.
  */
-export function refreshStaleActiveJobs(cwd) {
+function reconcileStaleActiveJob(cwd, job) {
+  if (!isActiveJobStatus(job.status) || !Number.isFinite(job.pid)) {
+    return job;
+  }
+  if (isCancelInProgress(job)) {
+    return job;
+  }
   const allowUnverified = process.platform === "win32";
-  for (const job of listJobs(cwd)) {
-    if (!isActiveJobStatus(job.status) || !Number.isFinite(job.pid)) {
-      continue;
-    }
-    if (isCancelInProgress(job)) {
-      continue;
-    }
-    const verification = verifyProcessRecord(
-      { pid: job.pid, processStartTime: job.processStartTime ?? null },
+  const verification = verifyProcessRecord(
+    { pid: job.pid, processStartTime: job.processStartTime ?? null },
+    { allowUnverified }
+  );
+  if (verification.matches || verification.reason === "unverifiable") {
+    return job;
+  }
+  // Live companion still owns the terminal commit; do not race it to failed/stale.
+  if (Number.isFinite(job.companionPid)) {
+    const companionVerification = verifyProcessRecord(
+      { pid: job.companionPid, processStartTime: job.companionProcessStartTime ?? null },
       { allowUnverified }
     );
-    if (verification.matches || verification.reason === "unverifiable") {
-      continue;
+    if (companionVerification.matches || companionVerification.reason === "unverifiable") {
+      return job;
     }
-    // Live companion still owns the terminal commit; do not race it to failed/stale.
-    if (Number.isFinite(job.companionPid)) {
+  }
+  const transition = transitionJob(cwd, job.id, (current) => {
+    if (!current || !isActiveJobStatus(current.status) || isCancelInProgress(current) || current.status === "cancelled") {
+      return { apply: false, reason: "skip-stale", job: current };
+    }
+    if (!Number.isFinite(current.pid)) {
+      return { apply: false, reason: "no-pid", job: current };
+    }
+    // Re-check identities under the lock so a pre-lock snapshot cannot stale-mark
+    // a job whose child/companion record changed (runner commit, re-track, etc.).
+    const currentVerification = verifyProcessRecord(
+      { pid: current.pid, processStartTime: current.processStartTime ?? null },
+      { allowUnverified }
+    );
+    if (currentVerification.matches || currentVerification.reason === "unverifiable") {
+      return { apply: false, reason: "process-live", job: current };
+    }
+    if (Number.isFinite(current.companionPid)) {
       const companionVerification = verifyProcessRecord(
-        { pid: job.companionPid, processStartTime: job.companionProcessStartTime ?? null },
+        { pid: current.companionPid, processStartTime: current.companionProcessStartTime ?? null },
         { allowUnverified }
       );
       if (companionVerification.matches || companionVerification.reason === "unverifiable") {
-        continue;
+        return { apply: false, reason: "companion-live", job: current };
       }
     }
-    transitionJob(cwd, job.id, (current) => {
-      if (!current || !isActiveJobStatus(current.status) || isCancelInProgress(current) || current.status === "cancelled") {
-        return { apply: false, reason: "skip-stale", job: current };
-      }
-      if (!Number.isFinite(current.pid)) {
-        return { apply: false, reason: "no-pid", job: current };
-      }
-      // Re-check identities under the lock so a pre-lock snapshot cannot stale-mark
-      // a job whose child/companion record changed (runner commit, re-track, etc.).
-      const currentVerification = verifyProcessRecord(
-        { pid: current.pid, processStartTime: current.processStartTime ?? null },
-        { allowUnverified }
-      );
-      if (currentVerification.matches || currentVerification.reason === "unverifiable") {
-        return { apply: false, reason: "process-live", job: current };
-      }
-      if (Number.isFinite(current.companionPid)) {
-        const companionVerification = verifyProcessRecord(
-          { pid: current.companionPid, processStartTime: current.companionProcessStartTime ?? null },
-          { allowUnverified }
-        );
-        if (companionVerification.matches || companionVerification.reason === "unverifiable") {
-          return { apply: false, reason: "companion-live", job: current };
-        }
-      }
-      return {
-        apply: true,
-        reason: "mark-stale",
-        job: staleJobPayload(current, currentVerification)
-      };
-    });
+    return {
+      apply: true,
+      reason: "mark-stale",
+      job: staleJobPayload(current, currentVerification)
+    };
+  });
+  return transition.job ?? job;
+}
+
+/**
+ * Refresh one job and return its latest durable state.
+ * Exported so waiters and tests can avoid rescanning every job in the workspace.
+ */
+export function refreshStaleActiveJob(cwd, reference) {
+  return reconcileStaleActiveJob(cwd, readFullJob(cwd, reference));
+}
+
+/**
+ * Mark active jobs whose recorded process identity is gone as failed/stale-process.
+ * Exported for list/status reconciliation and tests.
+ */
+export function refreshStaleActiveJobs(cwd) {
+  for (const job of listJobs(cwd)) {
+    reconcileStaleActiveJob(cwd, job);
   }
 }
 
@@ -103,12 +119,17 @@ async function waitForJob(cwd, reference, options = {}) {
   const timeoutMs = parseNonNegativeNumber(options.timeoutMs, 240000, "timeout");
   const pollIntervalMs = Math.max(100, parseNonNegativeNumber(options.pollIntervalMs, 250, "poll interval"));
   const deadline = Date.now() + timeoutMs;
-  let job = readFullJob(cwd, reference);
-  while (isActiveJobStatus(job.status) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, Math.max(0, deadline - Date.now()))));
-    job = readFullJob(cwd, reference);
+  while (true) {
+    const job = refreshStaleActiveJob(cwd, reference);
+    if (!isActiveJobStatus(job.status)) {
+      return { ...job, waitTimedOut: false };
+    }
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return { ...job, waitTimedOut: true };
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remainingMs)));
   }
-  return { ...job, waitTimedOut: isActiveJobStatus(job.status) };
 }
 
 export async function handleStatus(cwd, { reference = "", json = false, wait = false, all = false, timeoutMs = null, pollIntervalMs = null } = {}) {

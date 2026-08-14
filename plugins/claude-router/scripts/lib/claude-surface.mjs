@@ -91,6 +91,7 @@ export function parseClaudeHelp(text) {
   const parseWarnings = [];
   let section = null;
   let skippingExamples = false;
+  let currentFlag = null;
 
   for (const rawLine of String(text ?? "").split(/\r?\n/)) {
     const line = rawLine.trimEnd();
@@ -104,10 +105,12 @@ export function parseClaudeHelp(text) {
     }
     if (/^commands:/i.test(trimmed)) {
       section = "commands";
+      currentFlag = null;
       continue;
     }
     if (/^(options|flags):/i.test(trimmed)) {
       section = "options";
+      currentFlag = null;
       continue;
     }
     if (/^[A-Z][A-Za-z ]+:$/.test(trimmed)) {
@@ -116,6 +119,7 @@ export function parseClaudeHelp(text) {
         continue;
       }
       section = null;
+      currentFlag = null;
       continue;
     }
     if (skippingExamples) {
@@ -138,9 +142,14 @@ export function parseClaudeHelp(text) {
       const flag = parseFlagHelpLine(trimmed);
       if (flag) {
         flags.push(flag);
+        currentFlag = flag;
       } else if (trimmed.startsWith("-")) {
         parseWarnings.push(`unparsed flag line: ${trimmed}`);
       }
+      continue;
+    }
+    if (section === "options" && currentFlag && /^\s{4,}\S/.test(line)) {
+      currentFlag.description = `${currentFlag.description} ${trimmed}`.trim();
     }
   }
 
@@ -164,7 +173,9 @@ function parseFlagHelpLine(line) {
     names: unique(names.map((item) => item.name)),
     requiresValue: names.some((item) => Boolean(item.valueHint) && !item.optional),
     valueHint: names.find((item) => item.valueHint)?.valueHint ?? null,
-    description: line.replace(/^[-,\sA-Za-z0-9=<>\[\]_]+/, "").trim()
+    optionalValue: names.some((item) => Boolean(item.valueHint) && item.optional),
+    repeatable: names.some((item) => item.valueHint?.endsWith("...")),
+    description: line.slice(prefix[0].length).trim()
   };
 }
 

@@ -106,6 +106,8 @@ export function renderModelCatalog(catalog) {
     lines.push(
       `Discovery: ${catalog.discovery.status} (${catalog.discovery.source})`,
       `Claude CLI: ${catalog.discovery.claude_version ?? "unknown"}`,
+      `Completeness: ${catalog.discovery.completeness}`,
+      catalog.discovery.notes,
       ""
     );
     if (catalog.discovery.error) {
@@ -124,8 +126,20 @@ export function renderModelCatalog(catalog) {
     }
     lines.push("");
   }
+  if (Array.isArray(catalog.cli_fields)) {
+    lines.push(
+      "## Live Claude CLI Fields",
+      "",
+      "| Flag | Kind | Choices | Description |",
+      "| --- | --- | --- | --- |"
+    );
+    for (const field of catalog.cli_fields) {
+      lines.push(`| ${escapeCell(field.flag)} | ${escapeCell(field.kind)} | ${escapeCell(field.choices.join(", "))} | ${escapeCell(field.description)} |`);
+    }
+    lines.push("");
+  }
   lines.push(
-    "## Model Tiers",
+    "## Advertised Tier Annotations",
     "",
     "| Tier | Flag | Context | Long Context | Ultrathink | Cost |",
     "| --- | --- | --- | --- | --- | --- |"
@@ -134,12 +148,16 @@ export function renderModelCatalog(catalog) {
     lines.push(`| ${escapeCell(tier.display_name)} | ${escapeCell(tier.flag)} | ${escapeCell(tier.context_window)} | ${escapeCell(tier.long_context_window ?? "—")} | ${escapeCell(tier.supports_ultrathink ? "yes" : "no")} | ${escapeCell(tier.cost_tier)} |`);
   }
   lines.push("");
-  for (const tier of catalog.tiers) {
-    lines.push(`- **${tier.display_name}**: ${tier.notes}`);
+  if (!catalog.tiers.length) {
+    lines.push("No tier capability matrix is inferred from model names; inspect current Claude documentation for the selected model.");
+  } else {
+    for (const tier of catalog.tiers) {
+      lines.push(`- **${tier.display_name}**: ${tier.notes}`);
+    }
   }
   lines.push("", "## Effort Levels", "", "| Level | Description | Token Budget | Recommended For |", "| --- | --- | --- | --- |");
   for (const level of catalog.effort_levels) {
-    lines.push(`| ${escapeCell(level.flag_value)} | ${escapeCell(level.description)} | ${escapeCell(level.token_budget)} | ${escapeCell(level.recommended_for)} |`);
+    lines.push(`| ${escapeCell(level.flag_value)} | ${escapeCell(level.description)} | ${escapeCell(level.token_budget ?? "—")} | ${escapeCell(level.recommended_for ?? "—")} |`);
   }
   lines.push("", "## Modifiers", "");
   for (const mod of catalog.modifiers) {
@@ -151,8 +169,16 @@ export function renderModelCatalog(catalog) {
     lines.push(`| ${escapeCell(mode.flag_value)} | ${escapeCell(mode.description)} | ${escapeCell(mode.requires_allow_dangerous ? "yes" : "no")} |`);
   }
   lines.push("", "## Presets", "");
-  for (const preset of catalog.presets) {
-    lines.push(`- **${preset.flag}**: ${preset.description} (resolves to ${preset.resolves_to.tier})`);
+  if (!catalog.presets.length) {
+    lines.push("No model preset is advertised as authoritative. Pass a live `--model` selector explicitly.");
+  } else {
+    for (const preset of catalog.presets) {
+      lines.push(`- **${preset.flag}**: ${preset.description} (resolves to ${preset.resolves_to.tier})`);
+    }
+  }
+  lines.push("", "## Lean Profiles", "");
+  for (const profile of catalog.lean_profiles) {
+    lines.push(`- **--lean=${profile.router_value}**: ${profile.description} (${profile.available ? "available" : "not advertised by this Claude CLI"})`);
   }
   return `${lines.join("\n")}\n`;
 }

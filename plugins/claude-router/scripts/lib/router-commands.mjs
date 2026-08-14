@@ -3,7 +3,7 @@ export const ROUTER_COMMANDS = [
   { name: "surface", summary: "Show installed Claude CLI version/help plus Claude Router coverage." },
   { name: "help", summary: "Show Claude Router help, or Claude CLI help when a command path is provided." },
   { name: "version", summary: "Show Claude Router and installed Claude CLI versions." },
-  { name: "models", summary: "Show model selectors discovered from installed Claude CLI help plus curated controls." },
+  { name: "models", summary: "Show current model examples, choices, and fields from the installed Claude CLI." },
   { name: "raw", summary: "Run raw Claude CLI args with mutation and dangerous-permission guardrails." },
   { name: "cli", summary: "Alias for raw Claude CLI args with the same guardrails." },
   { name: "analyze", summary: "Run read-only Claude analysis in print mode.", routed: true },
@@ -35,5 +35,5 @@ export const MCP_TOOLS = [
   { name: "claude_router_status", description: "Show Claude Router jobs.", command: "status" },
   { name: "claude_router_result", description: "Show Claude Router job result.", command: "result" },
   { name: "claude_router_cancel", description: "Cancel a Claude Router job.", command: "cancel" },
-  { name: "claude_router_models", description: "Return live Claude model selectors plus curated effort levels, permission modes, and modifier flags.", command: "models" }
+  { name: "claude_router_models", description: "Read the installed Claude CLI and return current model examples, fields and choices, and lean-profile availability.", command: "models" }
 ];

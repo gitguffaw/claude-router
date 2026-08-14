@@ -89,7 +89,7 @@ function buildPrompt(mode, prompt, controls) {
   return parts.join("\n");
 }
 
-export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = null }) {
+export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = null, runtime = {}, dynamicClaudeArgs = [] }) {
   const config = MODE_CONFIG[mode];
   if (!config) {
     throw new Error(`Unsupported Claude Router mode "${mode}".`);
@@ -101,7 +101,7 @@ export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = nul
   rejectDangerous(options);
   rejectUnsupportedReviewTargeting(mode, options);
   requirePrompt(prompt);
-  const controls = resolveClaudeControls(options);
+  const controls = resolveClaudeControls(options, { ...runtime, mode });
   const permissionMode = resolvePermissionMode(mode, config, options, controls);
   const outputFormat = controls.outputFormat ?? config.outputFormat;
   const routedPrompt = buildPrompt(mode, prompt, controls);
@@ -122,7 +122,8 @@ export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = nul
       settings: options.settings ?? null,
       settingSources: options["setting-sources"] ?? null,
       addDirs: options["add-dir"] ?? [],
-      strictMcpConfig: Boolean(options["strict-mcp-config"])
+      strictMcpConfig: Boolean(options["strict-mcp-config"]),
+      dynamicClaudeArgs: [...dynamicClaudeArgs]
     },
     gitBefore,
     nonGoals: config.write ? ["Avoid unrelated refactors."] : ["Do not edit files."],

@@ -1,58 +1,30 @@
 # Claude Code CLI Quick Reference
 
-Working reference for the local Anthropic `claude` CLI.
-Verified against `claude 2.1.198 (Claude Code)` on `2026-07-02`.
-Official docs re-checked on `2026-07-02`: CLI reference, commands, model config, permission modes, MCP, sub-agents, plugins, skills, hooks, Chrome, ultrareview, remote control, gateway, and platform context windows.
+Working snapshot for the local Anthropic `claude` CLI. It is explanatory, never an allowlist. Re-read `claude --help` for models, choices, and flags before routing.
 
 ## Current Local Environment
 
 - Auth: logged in with first-party `claude.ai`
 - Subscription: `max`
 - Built-in/plugin agents and connected MCP servers are local-install dependent; confirm with `claude agents`, `claude plugin list`, and `claude mcp list` before promising availability.
-- On the 2026-07-02 audit machine, Claude Code itself did not list `claude-router` as an installed Claude plugin or Claude-side MCP server, even though Codex had `claude-router@claude-router` installed at `2.2.2`.
+- Plugin, MCP, agent, and model availability is machine-local and must be read live before use.
 
 ## Codex Interop Defaults
 
 - Preferred second-brain route: interactive `claude`
 - Preferred planning route: `claude --permission-mode plan`
 - Preferred machine-readable entrypoint: `python3 scripts/claude_print.py`
-- Preferred `--bare` behavior: opt-in only
+- Preferred lean OAuth behavior: `--safe-mode`
+- Preferred lean API-key behavior: `--bare`
 - Preferred print-mode schema input: file via `--schema-file`
 
 ## Model Selectors
 
-| Selector | Meaning |
-|----------|---------|
-| `default` | Special value that clears model override and reverts to the runtime default for the current account tier. Not itself a model alias. |
-| `best` | Most capable available route, currently equivalent to `opus` |
-| `sonnet` | Latest Sonnet alias for daily coding tasks |
-| `opus` | Latest Opus alias for complex reasoning |
-| `haiku` | Fast lower-cost route |
-| `sonnet[1m]` | Sonnet with 1M context where available |
-| `opus[1m]` | Opus with 1M context where available |
-| `opusplan` | Uses `opus` in plan mode and `sonnet` in execution |
-
-Provider notes:
-
-- Anthropic API docs currently map `opus` to Opus 4.7 and `sonnet` to Sonnet 4.6.
-- Bedrock, Vertex, and Foundry docs currently map `opus` to Opus 4.6 and `sonnet` to Sonnet 4.5.
-- Aliases move over time. Pin full model names or `ANTHROPIC_DEFAULT_*_MODEL` environment variables when stability matters.
+Run `claude --help` or Claude Router `models`. Pass the selected value through unchanged. Moving aliases, full names, suffixes, and provider mappings can change independently of this file.
 
 ## Effort Levels
 
-| Level | Use |
-|-------|-----|
-| `low` | Short, latency-sensitive work |
-| `medium` | Cost-sensitive work that still needs reasoning |
-| `high` | Minimum floor for intelligence-sensitive work |
-| `xhigh` | Best default on Opus 4.7 for demanding coding and agentic work |
-| `max` | Deepest reasoning mode for the current session |
-
-Effort notes:
-
-- `xhigh` falls back to the highest supported level at or below the requested level.
-- `max` is session-only unless `CLAUDE_CODE_EFFORT_LEVEL` is set.
-- `ultrathink` in the prompt is the one-turn deep-reasoning nudge.
+Read the current `--effort` choices from `claude --help`. Claude Router treats them as opaque strings so future values work without a router update.
 
 ## Planning And Research Surfaces
 
@@ -91,17 +63,18 @@ Effort notes:
 
 | Flag | Meaning |
 |------|---------|
-| `--permission-mode <acceptEdits|auto|bypassPermissions|default|dontAsk|plan>` | Set the permission policy |
+| `--permission-mode <mode>` | Set the permission policy; read current choices from installed help |
 | `--tools <tools...>` | Set the built-in tool list |
 | `--allowed-tools <tools...>` | Explicitly allow tool patterns |
 | `--disallowed-tools <tools...>` | Explicitly deny tool patterns |
 | `--agent <agent>` | Select one configured agent |
 | `--agents <json>` | Define custom agents inline |
 | `--model <model>` | Select the model |
-| `--effort <low|medium|high|xhigh|max>` | Select effort level |
+| `--effort <value>` | Select an effort value accepted by the installed CLI |
 | `--chrome` | Enable Claude in Chrome integration |
 | `--add-dir <directories...>` | Add tool-access directories |
-| `--bare` | Disable ambient conveniences and auto-loaded state |
+| `--safe-mode` | Disable customizations while retaining normal OAuth/auth behavior |
+| `--bare` | Minimal API/provider mode; skips OAuth and keychain reads |
 | `--settings <file-or-json>` | Load extra settings from a file or JSON string |
 | `--setting-sources <sources>` | Limit settings sources to `user`, `project`, and `local` |
 | `--mcp-config <configs...>` | Load MCP config from JSON files or strings |

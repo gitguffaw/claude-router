@@ -154,6 +154,7 @@ export function buildClaudePrintArgs(request) {
   appendRepeatable(args, "--plugin-url", controls.pluginUrls);
   appendRepeatable(args, "--mcp-config", controls.mcpConfigs);
   appendRepeatable(args, "--add-dir", controls.addDirs);
+  args.push(...(controls.dynamicClaudeArgs ?? []).map(String));
   args.push(request.prompt);
   return args;
 }

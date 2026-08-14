@@ -35,7 +35,7 @@ if (args.includes("--version")) {
   process.exit(0);
 }
 if (args.includes("--help")) {
-  console.log("Usage: claude [options] [command] [prompt]\\nOptions:\\n  --model <model>  Model for the current session. Provide an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g. 'claude-fable-5').\\nCommands:\\n  mcp\\n  plugin\\n  agents");
+  console.log("Usage: claude [options] [command] [prompt]\\nOptions:\\n  --model <model>  Model for the current session. Provide an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g. 'claude-fable-5').\\n  --effort <level> Effort level (low, medium, high, xhigh, max)\\n  --permission-mode <mode> Permission mode (choices: \\"acceptEdits\\", \\"auto\\", \\"bypassPermissions\\", \\"manual\\", \\"dontAsk\\", \\"plan\\")\\n  --allow-dangerously-skip-permissions Enable bypass as an option\\n  --dangerously-skip-permissions Bypass permissions\\n  --safe-mode Disable customizations while keeping OAuth\\n  --bare Minimal API-key mode\\n  --tools <tools...> Built-in tools\\n  --system-prompt <prompt> Replace the system prompt\\n  --future-flag <value> Future Claude field\\nCommands:\\n  mcp\\n  plugin\\n  agents");
   process.exit(0);
 }
 if (args[0] === "auth" && args[1] === "status") {

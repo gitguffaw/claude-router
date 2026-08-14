@@ -2,6 +2,22 @@
 
 All notable changes to Claude Router are documented here.
 
+## Unreleased
+
+## [2.4.0] — 2026-08-14
+
+### Added
+
+- Added auth-aware lean profiles: `--lean` auto-detects the active path, `--lean=oauth` uses Claude `--safe-mode`, and `--lean=api` uses `--bare`, with minimal core prompts and route-appropriate tool defaults that explicit controls can override.
+- Added a capability guide with managed-mode boundaries, live discovery semantics, lean authentication behavior, job lifecycle examples, and guarded raw-access examples.
+
+### Changed
+
+- Rebuilt the model catalog from installed `claude --help` on every call. Models are no longer padded with curated fallbacks, effort and permission choices are live, and the catalog now exposes all discovered CLI fields plus its `documented-examples` completeness limit.
+- Added live Claude fields to managed CLI parsing and MCP schemas so newly installed native flags can route without a Claude Router release; model and effort values are opaque pass-through strings.
+- Removed stale static catalog mode and model capability filtering, both of which could silently omit new models or misstate changing capabilities.
+- Hardened raw passthrough so live-but-unclassified future commands require explicit mutation consent instead of defaulting to safe.
+
 ## [2.3.1] — 2026-07-11
 
 ### Fixed

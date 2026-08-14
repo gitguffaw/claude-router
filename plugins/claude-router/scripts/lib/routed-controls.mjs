@@ -1,14 +1,15 @@
-import { PERMISSION_MODES } from "./model-catalog.mjs";
-
 const STRING_SCHEMA = { type: "string" };
 const BOOLEAN_SCHEMA = { type: "boolean" };
 const NONNEGATIVE_NUMBER_SCHEMA = { type: "number", minimum: 0 };
 const STRING_OR_STRING_ARRAY_SCHEMA = { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] };
 const BOOLEAN_OR_STRING_SCHEMA = { oneOf: [{ type: "boolean" }, { type: "string" }] };
+const LEAN_SCHEMA = { oneOf: [{ type: "boolean" }, { type: "string", enum: ["auto", "oauth", "api"] }] };
 
 export const READ_ONLY_ROUTED_COMMANDS = new Set(["analyze", "plan", "review", "adversarial-review"]);
 export const READ_ONLY_PERMISSION_MODES = ["plan"];
-export const WRITE_CAPABLE_PERMISSION_MODES = PERMISSION_MODES.map((mode) => mode.flag_value);
+// Retained as an empty compatibility export. Write-capable permission values
+// are discovered from the installed Claude CLI rather than frozen here.
+export const WRITE_CAPABLE_PERMISSION_MODES = [];
 
 function defaultInputKeys(option) {
   const snake = option.replaceAll("-", "_");
@@ -78,6 +79,7 @@ export const ROUTED_VALUE_CONTROLS = [
 ];
 
 export const ROUTED_OPTIONAL_VALUE_CONTROLS = [
+  control({ flag: "--lean", schema: LEAN_SCHEMA }),
   control({ flag: "--debug", schema: BOOLEAN_OR_STRING_SCHEMA }),
   control({ flag: "--resume", schema: BOOLEAN_OR_STRING_SCHEMA }),
   control({ flag: "--tmux", schema: BOOLEAN_OR_STRING_SCHEMA }),
@@ -147,7 +149,7 @@ function permissionModeSchemaForCommand(command) {
   if (command && READ_ONLY_ROUTED_COMMANDS.has(command)) {
     return { type: "string", enum: [...READ_ONLY_PERMISSION_MODES] };
   }
-  return { type: "string", enum: [...WRITE_CAPABLE_PERMISSION_MODES] };
+  return { type: "string" };
 }
 
 export function routedInputSchemaProperties({ includeAliases = false, command = null, mcpOnly = false } = {}) {

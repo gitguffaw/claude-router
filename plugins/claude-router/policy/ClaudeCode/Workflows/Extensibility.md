@@ -94,7 +94,7 @@ claude mcp add -e API_KEY=xxx my-server -- npx my-mcp-server
 
 - Use `--plugin-dir` for session-scoped plugin loading.
 - Use `--mcp-config` plus `--strict-mcp-config` to isolate MCP behavior.
-- Use `--bare` when hidden Claude state is part of the bug, not as the default.
+- Use `--safe-mode` to isolate an OAuth/subscription session from hidden Claude state. Use `--bare` only when API/provider credentials are configured.
 - `claude mcp list` and `claude mcp get` can spawn stdio servers from `.mcp.json`; use them only in trusted directories.
 
 ## Notes

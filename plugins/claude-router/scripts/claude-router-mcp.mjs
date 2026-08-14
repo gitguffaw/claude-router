@@ -4,7 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
-import { runProcess } from "./lib/process.mjs";
+import { runCommand, runProcess } from "./lib/process.mjs";
 import { MCP_TOOLS, ROUTED_COMMAND_NAMES } from "./lib/router-commands.mjs";
 import {
   MCP_ROUTED_BOOLEAN_CONTROLS,
@@ -13,6 +13,7 @@ import {
   routedFlagEntries,
   routedInputSchemaProperties
 } from "./lib/routed-controls.mjs";
+import { appendLiveControlArgs, dynamicRoutedControls, schemaForLiveControl } from "./lib/live-controls.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const COMPANION = path.join(ROOT, "scripts", "claude-companion.mjs");
@@ -23,6 +24,28 @@ const ROUTED_COMMANDS = ROUTED_COMMAND_NAMES;
 const VALUE_FLAGS = routedFlagEntries(MCP_ROUTED_VALUE_CONTROLS);
 const OPTIONAL_VALUE_FLAGS = routedFlagEntries(MCP_ROUTED_OPTIONAL_VALUE_CONTROLS);
 const BOOLEAN_FLAGS = routedFlagEntries(MCP_ROUTED_BOOLEAN_CONTROLS);
+const STATIC_ROUTED_OPTIONS = new Set([
+  ...MCP_ROUTED_VALUE_CONTROLS,
+  ...MCP_ROUTED_OPTIONAL_VALUE_CONTROLS,
+  ...MCP_ROUTED_BOOLEAN_CONTROLS
+].flatMap((control) => [control.option, ...control.optionAliases]));
+const ROUTER_OWNED_SCHEMA_OPTIONS = new Set([
+  "allow-dangerous",
+  "background",
+  "best",
+  "haiku",
+  "lean",
+  "long-context",
+  "opus",
+  "sonnet",
+  "timeout-ms",
+  "ultrathink"
+]);
+const STATIC_MCP_CONTROLS = [
+  ...MCP_ROUTED_VALUE_CONTROLS,
+  ...MCP_ROUTED_OPTIONAL_VALUE_CONTROLS,
+  ...MCP_ROUTED_BOOLEAN_CONTROLS
+];
 
 // Outer bound on companion invocations so a wedged child cannot block forever.
 // Exceeds companion managed default (30 min) plus kill grace.
@@ -157,7 +180,7 @@ export function formatProcessFailure(result) {
   return "process failed";
 }
 
-export function schemaFor(tool) {
+export function schemaFor(tool, liveControls = null) {
   const properties = {
     cwd: { type: "string" }
   };
@@ -167,16 +190,7 @@ export function schemaFor(tool) {
       type: "object",
       additionalProperties: false,
       properties: {
-        cwd: { type: "string" },
-        capability: {
-          type: "string",
-          enum: ["long_context", "ultrathink", "chrome"],
-          description: "Filter models to those supporting a specific capability."
-        },
-        static: {
-          type: "boolean",
-          description: "Skip live Claude CLI help discovery and return only curated model data."
-        }
+        cwd: { type: "string" }
       },
       required: []
     };
@@ -187,6 +201,33 @@ export function schemaFor(tool) {
       routedInputSchemaProperties({ mcpOnly: true, command: tool.command }),
       { prompt: { type: "string" } }
     );
+    if (Array.isArray(liveControls)) {
+      const liveOptions = new Set(liveControls.flatMap((control) => [control.option, ...control.optionAliases]));
+      for (const control of STATIC_MCP_CONTROLS) {
+        if (ROUTER_OWNED_SCHEMA_OPTIONS.has(control.option) || liveOptions.has(control.option)) {
+          continue;
+        }
+        delete properties[control.inputKeys[0]];
+      }
+    }
+    const readOnly = ["analyze", "plan", "review", "adversarial-review"].includes(tool.command);
+    for (const control of liveControls ?? []) {
+      if (["help", "print", "version"].includes(control.option)) {
+        continue;
+      }
+      if (readOnly && control.dangerous) {
+        continue;
+      }
+      const key = control.inputKeys[0];
+      const liveSchema = schemaForLiveControl(control);
+      if (!properties[key]) {
+        properties[key] = liveSchema;
+      } else if (control.option !== "permission-mode" || !readOnly) {
+        properties[key] = liveSchema;
+      } else if (liveSchema.description) {
+        properties[key].description = liveSchema.description;
+      }
+    }
     required = tool.prompt ? ["prompt"] : [];
   } else if (tool.command === "raw") {
     Object.assign(properties, {
@@ -376,7 +417,7 @@ function appendOptionalValue(args, input, flag, keys) {
   }
 }
 
-function appendRoutedFlags(args, input) {
+function appendRoutedFlags(args, input, liveControls = []) {
   for (const [flag, ...keys] of VALUE_FLAGS) {
     appendValue(args, input, flag, keys);
   }
@@ -386,15 +427,20 @@ function appendRoutedFlags(args, input) {
   for (const [flag, ...keys] of BOOLEAN_FLAGS) {
     appendBoolean(args, input, flag, keys);
   }
+  appendLiveControlArgs(
+    args,
+    input,
+    liveControls.filter((control) => !STATIC_ROUTED_OPTIONS.has(control.option))
+  );
 }
 
-function buildCompanionArgs(tool, input = {}) {
+function buildCompanionArgs(tool, input = {}, liveControls = []) {
   const args = [COMPANION, tool.command, "--json"];
   if (input.cwd) {
     args.push("--cwd", input.cwd);
   }
   if (ROUTED_COMMANDS.has(tool.command)) {
-    appendRoutedFlags(args, input);
+    appendRoutedFlags(args, input, liveControls);
     // Argument boundary: every MCP prompt is data, including strings that begin with dashes.
     if (input.prompt !== undefined && input.prompt !== null) {
       args.push("--", String(input.prompt));
@@ -435,13 +481,6 @@ function buildCompanionArgs(tool, input = {}) {
     if (input.target) {
       args.push(String(input.target));
     }
-  } else if (tool.command === "models") {
-    if (input.capability) {
-      args.push("--capability", input.capability);
-    }
-    if (input.static) {
-      args.push("--static");
-    }
   } else if (input.job_id) {
     args.push(input.job_id);
   }
@@ -465,11 +504,13 @@ async function callTool(name, input = {}) {
   if (!tool) {
     throw new Error(`Unknown tool ${name}`);
   }
-  validateAgainstSchema(schemaFor(tool), input ?? {});
+  const discoveryCwd = resolveMcpCwd(input.cwd) || ROOT;
+  const liveControls = readLiveRoutedControls(discoveryCwd);
+  validateAgainstSchema(schemaFor(tool, liveControls), input ?? {});
   // Canonicalize once at the MCP boundary before buildCompanionArgs and spawn.
   const resolvedCwd = resolveMcpCwd(input.cwd);
   const toolInput = resolvedCwd ? { ...input, cwd: resolvedCwd } : input;
-  const args = buildCompanionArgs(tool, toolInput);
+  const args = buildCompanionArgs(tool, toolInput, liveControls);
   const outerTimeoutMs = resolveOuterTimeoutMs(toolInput.timeout_ms);
   let inFlightEntry = null;
   let result;
@@ -505,17 +546,26 @@ function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
+function readLiveRoutedControls(cwd = ROOT) {
+  const result = runCommand("claude", ["--help"], { cwd, env: process.env });
+  if (result.status !== 0 || result.error) {
+    return [];
+  }
+  return dynamicRoutedControls(result.stdout || result.stderr, { includeManaged: true });
+}
+
 function handleRequest(message) {
   if (message.method === "initialize") {
     send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "claude-router", version: PLUGIN_VERSION } } });
     return;
   }
   if (message.method === "tools/list") {
+    const liveControls = readLiveRoutedControls(ROOT);
     send({
       jsonrpc: "2.0",
       id: message.id,
       result: {
-        tools: tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: schemaFor(tool) }))
+        tools: tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: schemaFor(tool, liveControls) }))
       }
     });
     return;

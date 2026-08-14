@@ -42,7 +42,7 @@ Do not replace a failed Claude run with a Codex-generated substitute answer.
 - `surface`: report installed Claude version, top-level help, and router coverage
 - `help`: show Claude Router help, or installed Claude help when a command path is provided
 - `version`: report Claude Router and installed Claude CLI versions
-- `models`: report live Claude model selectors plus curated effort, permission, modifier, and preset metadata
+- `models`: read the installed CLI and report documented model examples, live fields and choices, and lean-profile availability
 - `raw`: run a raw Claude CLI command with mutation and dangerous-permission guardrails
 - `analyze`: read-only facts, tradeoffs, recommendations, and next action
 - `plan`: read-only implementation or migration plan
@@ -54,19 +54,19 @@ Do not replace a failed Claude run with a Codex-generated substitute answer.
 ## Controls
 
 - `--model <model>` passes through to Claude. Use `claude_router_models` or `models` to discover live selectors from the installed Claude CLI.
-- `--best` maps to `opus`.
-- `--sonnet`, `--opus`, and `--haiku` are convenience selectors.
-- `--effort <low|medium|high|xhigh|max>` passes through to Claude.
-- `--long-context` and `--ultrathink` are router-level conveniences: long-context rewrites the model selector, and ultrathink adds a reasoning request to the prompt.
-- `--chrome`, `--plugin-dir`, `--plugin-url`, `--mcp-config`, `--settings`, `--add-dir`, agents, tools, allowlists, schemas, resume/session, and print-mode streaming controls are available when the user explicitly needs those Claude surfaces.
+- `--effort <value>` passes through without a router allowlist. Use live discovery for current choices.
+- `--lean[=auto|oauth|api]` creates a minimal-context run. Auto detects auth; OAuth uses Claude `--safe-mode`; API uses `--bare`.
+- Lean defaults are `Bash,Read` for read-only modes and `Bash,Read,Edit,Write` for `exec`, plus a concise core system prompt. Explicit `--tools` and `--system-prompt` override them.
+- `--best`, tier shorthands, `--long-context`, and `--ultrathink` are legacy compatibility conveniences. Prefer explicit live model selectors and native fields.
+- Native Claude fields are discovered from installed help and added to the routed surface dynamically. Use `surface` or `help` to inspect exact local behavior.
 - `--timeout-ms <milliseconds>` bounds managed routed Claude print jobs; `0` disables the managed timeout.
 - `--background` returns a job id; use `status`, `result`, or `cancel` for follow-up.
-- For Claude features that are not represented by a curated tool, call `surface` or `help` first, then use `raw` with exact Claude CLI args.
+- For Claude commands that are not represented by a managed tool, call `surface` or `help` first, then use `raw` with exact Claude CLI args.
 
 ## Hard Rules
 
 - Do not claim Claude has a native generic web-search command. Use Chrome, MCP, or explicit docs verification when needed.
-- Do not use `--bare` by default.
+- Do not use `--bare` on an OAuth/subscription path; it does not read OAuth or keychain credentials. Use `--lean` or `--lean=oauth` instead.
 - Do not use dangerous permission bypass unless the user explicitly asks for that risk.
 - Do not use `raw` for mutating Claude configuration unless the user explicitly requested that action; pass the raw tool's mutation override only in that case.
 - Do not edit files from `analyze`, `plan`, `review`, or `adversarial-review`.

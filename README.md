@@ -1,8 +1,124 @@
 # Claude Router
 
-Current release: `v2.3.1`
+Current release: `v2.4.0`
 
-Claude Router lets a host agent delegate work to the local Claude Code CLI through policy-backed modes for setup, analysis, planning, implementation, review, model and capability discovery, background jobs, result retrieval, and guarded access to installed Claude CLI features.
+Claude Router lets Codex or AGY ask the Claude Code CLI already installed on your computer to handle a specific task. You choose the kind of result you want—an explanation, a plan, an implementation, or a review—and the router starts Claude with the appropriate file permissions and returns its result.
+
+It is a local task dispatcher, not a cloud proxy or a separate model provider. Your host agent starts your installed `claude` program using the authentication and models available on your machine.
+
+You do not need to learn router commands to use it from Codex or AGY. Ask your host agent in plain English:
+
+```text
+Use Claude Router to review my current changes. Do not fix anything.
+```
+
+The host selects the matching Claude Router tool. The explicit tool and command names in this README are available when you need more control.
+
+## Start Here: Choose By Situation
+
+| Your situation | Ask for | What to expect |
+| --- | --- | --- |
+| You want Claude to explain unfamiliar code or diagnose a problem | `analyze` | Claude reads the project and reports what it finds. It cannot edit files. |
+| You know the goal but want a safe sequence before changing code | `plan` | Claude returns implementation steps, risks, and verification ideas. It cannot edit files. |
+| You want Claude to make a bounded change | `exec` | Claude may edit files and run commands, then reports the changes and checks it ran. |
+| You already have a diff and want a second opinion | `review` | Claude reports concrete findings first. It does not silently fix them. |
+| The proposed design may be clever but wrong | `adversarial-review` | Claude challenges assumptions, unnecessary complexity, and better alternatives. It does not edit. |
+| The task is self-contained and Claude needs fewer distractions | Add `lean` | Claude starts with minimal custom context and a small tool set. This is especially useful for focused Fable calls. |
+| The task may take several minutes and you want to keep working | Add `background` | The call returns a job ID. Ask for status or the result later. |
+| You want to use a newly released Claude model or flag | Pass it normally | The router reads the installed Claude CLI at runtime instead of relying on a frozen list. |
+| You need a Claude CLI feature the router does not manage directly | `raw` / `cli` | The router passes exact CLI arguments through while guarding configuration changes and dangerous permissions. |
+
+### Examples You Can Copy
+
+Understand an unfamiliar repository before deciding what to change:
+
+```text
+Use Claude Router analyze to map the authentication flow in this repository.
+Explain where credentials enter, how they are stored, and where failures surface.
+Do not edit files.
+```
+
+Turn an agreed goal into a plan without starting implementation:
+
+```text
+Use Claude Router plan to replace the legacy parser.
+Include likely files, migration risks, tests, and a safe order of work.
+```
+
+Delegate one well-defined implementation:
+
+```text
+Use Claude Router exec to fix the failing date-parser tests.
+Keep the change limited to the parser, run the focused tests, and summarize the diff.
+```
+
+Review work before you commit it:
+
+```text
+Use Claude Router review on my current diff.
+Findings first, no auto-fixes. Focus on correctness and missing tests.
+```
+
+Challenge a consequential design decision:
+
+```text
+Use Claude Router adversarial review on the proposed cache layer.
+Check whether the cache is needed, which invalidation assumptions can fail,
+and whether a simpler design would meet the same goal.
+```
+
+Run a focused Fable analysis with minimal context while keeping your Claude subscription login:
+
+```text
+Use Claude Router analyze in lean OAuth mode with model fable and max effort.
+Find the smallest safe fix for this parser bug.
+```
+
+Run the same kind of minimal call with API credentials instead of a subscription login:
+
+```text
+Use Claude Router analyze in lean API mode with model fable and max effort.
+Explain this module in five bullets.
+```
+
+### When Lean Mode Helps—and When It Does Not
+
+Normal Claude sessions can load project instructions, memory, plugins, hooks, MCP servers, and many tool descriptions. That context is valuable for broad repository work, but it can distract from a small, self-contained problem. Lean mode deliberately removes most of it and supplies only a concise coding prompt plus a small tool set.
+
+Use lean mode when:
+
+- the task is narrow and fully described in your request;
+- you want a clean second opinion that is not influenced by repository instructions;
+- a model such as Fable should spend its attention on the problem instead of dozens of tool definitions; or
+- you are repeatedly making small scripted or command-line calls.
+
+Do not use lean mode when:
+
+- the task depends on `CLAUDE.md`, project memory, a plugin, an MCP server, or a specialized skill;
+- Claude needs browser, database, design, or other tools beyond the small default set; or
+- you are exploring a repository and do not yet know which local instructions matter.
+
+Plain `lean` automatically chooses an authentication-compatible isolation mode. Use `lean OAuth` when you want your normal Claude subscription login, or `lean API` when the process has API/provider credentials. API lean mode does not read OAuth or keychain credentials.
+
+### What “Dynamic” Means
+
+Claude Router does not ship a permanent dropdown of model names, effort levels, permission modes, or Claude flags. Before each managed call, it reads the help exposed by the installed `claude` binary and rebuilds the fields it can route. Explicit model and effort values are passed to Claude for final validation.
+
+This matters when Anthropic releases a new model or flag: update Claude Code, then use the new value without waiting for a Claude Router release. Run the `models`, `surface`, or `help` capability if you want to see what your local installation currently advertises.
+
+## How It Fits Together
+
+```text
+Your request in Codex or AGY
+        ↓
+Claude Router chooses a permission boundary and Claude options
+        ↓
+Your locally installed Claude Code CLI does the work
+        ↓
+Claude Router returns or stores the result
+```
+
+“Read-only” means the router starts Claude with planning-only permissions and verifies that project files did not change. “Background” means the job keeps running while your host agent continues other work. “OAuth” means your normal Claude subscription login; “API” means credentials supplied through an API key or supported provider configuration.
 
 It ships as:
 
@@ -186,7 +302,7 @@ Claude Router exposes a `/claude-router:*` command palette when installed in Cla
 
 - `/claude-router:setup`: check local Claude readiness
 - `/claude-router:version`: show Claude Router and Claude CLI versions
-- `/claude-router:models`: show live model selectors and curated controls
+- `/claude-router:models`: show model examples, choices, and fields from the installed Claude CLI
 - `/claude-router:surface`: show installed Claude CLI help plus router coverage
 - `/claude-router:help`: show router help or Claude subcommand help
 - `/claude-router:analyze`: run read-only analysis
@@ -236,35 +352,11 @@ The plugin exposes these Codex tools:
 - `claude_router_ultrareview`: run Claude's cloud-hosted `ultrareview`
 - `claude_router_status`: list or inspect jobs
 - `claude_router_result`: fetch a stored job result
-- `claude_router_models`: return live Claude model selectors plus curated effort levels, permission modes, and modifier flags
+- `claude_router_models`: read the installed CLI and return current model examples, effort/permission choices, flags, and lean profiles
 - `claude_router_cancel`: cancel a background job
 - `claude_router_raw`: run raw Claude CLI args with guardrails
 
-## Common Uses
-
-Ask Claude for read-only analysis:
-
-```text
-Use Claude Router to analyze the auth flow. Do not edit files.
-```
-
-Ask Claude for a plan:
-
-```text
-Use Claude Router to plan a migration from the current adapter to a fuller plugin surface.
-```
-
-Ask Claude to implement:
-
-```text
-Use Claude Router exec to implement the narrowest fix for the failing tests.
-```
-
-Ask Claude to review:
-
-```text
-Use Claude Router review on my current diff. Findings first, no auto-fixes.
-```
+## More Useful Patterns
 
 Run a long task in the background:
 
@@ -286,42 +378,44 @@ Ask which models and effort levels are available:
 Use Claude Router models to show available Claude models and effort levels.
 ```
 
-Filter to models that support a capability:
+If Claude rejects a model or effort value after an update, ask what the installed CLI currently advertises:
 
 ```text
-Use Claude Router models filtered to ultrathink support.
+Use Claude Router models and show me the documented model examples,
+effort levels, and lean profiles on this machine.
 ```
 
 ## Model Catalog Reference
 
-The `claude_router_models` tool and `models` companion mode query the installed Claude CLI help for accepted `--model` selectors, then merge those live selectors with curated metadata for stable controls such as effort levels, permission modes, presets, and known tier capabilities. For example, if the installed Claude CLI advertises `fable` and `claude-fable-5`, the model selector list includes them without a router release.
+The `claude_router_models` tool and `models` companion mode read the installed `claude --help` on every call. Claude Router does not freeze model, effort, permission, or native flag values in its release. If Claude adds a selector, effort value, permission mode, or top-level session flag, discovery updates with the installed CLI.
+
+Claude help currently gives model examples rather than an exhaustive registry. The catalog reports those examples with `completeness: documented-examples`, and the router passes any explicit `--model` or `--effort` value through for Claude itself to validate.
 
 ### Catalog Sections
 
-- `discovery` — live model discovery status, Claude CLI version, selectors, aliases, full names, and any discovery error
-- `models` — selectors accepted by the installed Claude CLI plus curated fallback selectors
-- `tiers` — known tier metadata (haiku, sonnet, opus) with context windows, long-context support, ultrathink support, and cost tier
-- `effort_levels` — reasoning depth controls (low, medium, high, xhigh, max) with token budgets
-- `modifiers` — router controls and Claude session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) with tier compatibility. `--long-context` and `--ultrathink` are router-level conveniences; `--chrome`, `--no-chrome`, and `--bare` pass through to Claude.
-- `permission_modes` — Claude session permission controls (default, acceptEdits, auto, plan, dontAsk, bypassPermissions)
-- `presets` — shortcut flags (`--best` resolves to opus)
+- `discovery` — live discovery status, Claude version, documented selectors, and the catalog completeness limit
+- `models` — model aliases and full names found in the installed `--model` help; never padded with router fallback models
+- `cli_fields` — every top-level Claude flag discovered locally, including type, choices, aliases, descriptions, and safety metadata
+- `effort_levels` — current `--effort` choices parsed from live help
+- `permission_modes` — current `--permission-mode` choices parsed from live help; dangerous bypass remains router-gated
+- `lean_profiles` — whether OAuth safe mode and API-key bare mode are advertised by this Claude installation
+- `tiers` — retained as an empty compatibility section; the router no longer invents a model capability matrix from family names
+- `modifiers` — discovered native isolation/browser flags plus explicitly labeled legacy router conveniences
+- `presets` — empty unless a future authoritative router preset can avoid pinning a moving model family
 
-### Permission Modes
+Static catalog mode and model capability filtering were removed because both could silently become wrong as Claude adds models and features. Run `node scripts/claude-companion.mjs models` from the plugin directory for the current local surface.
 
-| Mode | Flag Value | Description | Requires `--allow-dangerous` |
-| --- | --- | --- | --- |
-| default | `default` | Interactive approval for writes and commands | No |
-| acceptEdits | `acceptEdits` | Accept file edits automatically under Claude's permission semantics | No |
-| auto | `auto` | Claude's automatic permission mode | No |
-| plan | `plan` | Read-only; no file writes or command execution | No |
-| dontAsk | `dontAsk` | Avoid interactive asks according to Claude's permission semantics | No |
-| bypassPermissions | `bypassPermissions` | Skip all permission checks | Yes |
+## Capability Guide
 
-### Capability Filtering
+Claude Router’s surfaces solve different problems:
 
-Pass `capability` to filter tiers. Valid values: `long_context`, `ultrathink`, `chrome`. Unknown values are rejected.
+- Managed work: `analyze`, `plan`, `exec`, `review`, `adversarial-review`, and `ultrareview`
+- Live discovery: `models`, `surface`, and `help`
+- Minimal-context work: `--lean`, `--lean=oauth`, and `--lean=api`
+- Job lifecycle: `--background`, `status`, `result`, and `cancel`
+- Guarded full CLI access: `raw` and `cli`
 
-For the full rendered catalog, run `node scripts/claude-companion.mjs models` from the plugin directory. Use `--static` to skip live CLI help discovery.
+See [Claude Router Capabilities](plugins/claude-router/docs/capabilities.md) for boundaries, authentication behavior, and copyable examples.
 
 ## Coding And Documentation Workflows
 
@@ -410,7 +504,6 @@ node scripts/claude-companion.mjs plan --cwd /path/to/project --background "plan
 node scripts/claude-companion.mjs status --cwd /path/to/project
 node scripts/claude-companion.mjs result --cwd /path/to/project <job-id>
 node scripts/claude-companion.mjs models
-node scripts/claude-companion.mjs models --capability ultrathink
 node scripts/claude-companion.mjs cancel --cwd /path/to/project <job-id>
 ```
 
@@ -420,11 +513,14 @@ Claude controls pass through:
 node scripts/claude-companion.mjs analyze --cwd /path/to/project --model opus --effort high "inspect performance risks"
 node scripts/claude-companion.mjs plan --cwd /path/to/project --chrome "research and plan the browser workflow"
 node scripts/claude-companion.mjs exec --cwd /path/to/project --allowed-tools "Read,Edit" "apply the requested fix"
+node scripts/claude-companion.mjs analyze --cwd /path/to/project --lean --model fable --effort max "find the narrowest fix"
 ```
+
+`--lean` chooses `--safe-mode` for OAuth/subscription auth and `--bare` for API-key auth. Read-only routes default to `Bash,Read`; `exec` defaults to `Bash,Read,Edit,Write`. Override either default with `--tools` and `--system-prompt`. Bare mode does not read OAuth or keychain credentials.
 
 ## Full Claude CLI Access
 
-Claude Router has curated tools for common workflows, plus `help` and `raw` for Claude features that do not need a bespoke plugin tool.
+Claude Router has managed tools for common workflows, live discovery for the installed CLI, and `help`/`raw` for Claude features that do not need a bespoke plugin tool.
 
 Check local Claude support:
 
@@ -472,7 +568,7 @@ node scripts/claude-companion.mjs raw --allow-dangerous -- -p --permission-mode 
 | `surface` | No | Installed Claude version and top-level help |
 | `help` | No | Help for a Claude command path |
 | `version` | No | Claude Router version plus installed Claude CLI version |
-| `models` | No | Available Claude models, effort levels, permission modes, and modifier flags |
+| `models` | No | Live documented model examples, CLI fields, choices, and lean-profile availability |
 | `raw` | Depends | Exact Claude CLI args with mutation and danger guardrails |
 | `cli` | Depends | Alias for guarded raw Claude CLI passthrough |
 

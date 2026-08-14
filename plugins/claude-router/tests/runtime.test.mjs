@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { buildEnv, initGitRepo, installFakeClaude, makeTempDir, run } from "./helpers.mjs";
+import { buildProcessRecord } from "../scripts/lib/process.mjs";
 import { listJobs, readJobFile, upsertJob, writeJobFile } from "../scripts/lib/state.mjs";
 import { handleCancel } from "../scripts/lib/job-commands.mjs";
 
@@ -45,6 +46,23 @@ function waitForProcessExit(pid, timeoutMs = 3000) {
     sleep(25);
   }
   return !processAlive(pid);
+}
+
+function collectChild(child) {
+  let stdout = "";
+  let stderr = "";
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr?.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  return new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
+  });
 }
 
 function installFakeClaudeWithoutRouter(binDir) {
@@ -137,7 +155,8 @@ test("top-level help reports Claude Router commands", () => {
   const result = run("node", [SCRIPT, "--help"], { cwd: ROOT });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /# Claude Router/);
-  assert.match(result.stdout, /models\s+Show model selectors/);
+  assert.match(result.stdout, /models\s+Show current model examples, choices, and fields/);
+  assert.match(result.stdout, /--lean\[=auto\|oauth\|api\]/);
   assert.match(result.stdout, /cli\s+Alias for raw Claude CLI args/);
   assert.match(result.stdout, /version\s+Show Claude Router/);
 });
@@ -163,6 +182,17 @@ test("models command includes live Fable selector from Claude help", () => {
   const fable = payload.models.find((model) => model.selector === "fable");
   assert.ok(fable, "fable selector missing");
   assert.equal(fable.full_name, "claude-fable-5");
+  assert.ok(payload.cli_fields.some((field) => field.flag === "--future-flag"));
+  assert.deepEqual(payload.effort_levels.map((level) => level.id), ["low", "medium", "high", "xhigh", "max"]);
+});
+
+test("models command refuses stale static mode", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  const result = run("node", [SCRIPT, "models", "--static"], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /always reads the installed Claude CLI/);
 });
 
 test("raw claude command can read help and blocks mutating commands by default", () => {
@@ -379,6 +409,29 @@ test("routed CLI preserves explicit empty --tools value", () => {
   const index = args.indexOf("--tools");
   assert.notEqual(index, -1);
   assert.equal(args[index + 1], "");
+});
+
+test("routed CLI discovers future native fields and applies OAuth lean mode", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const result = run("node", [
+    SCRIPT,
+    "analyze",
+    "--json",
+    "--lean",
+    "--future-flag",
+    "future-value",
+    "inspect future surface"
+  ], { cwd: repo, env: buildEnv(bin, data) });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.request.controls.leanProfile.id, "oauth");
+  assert.ok(payload.result.args.includes("--safe-mode"));
+  assert.equal(payload.result.args[payload.result.args.indexOf("--future-flag") + 1], "future-value");
+  assert.equal(payload.result.args[payload.result.args.indexOf("--tools") + 1], "Bash,Read");
 });
 
 test("routed commands reject CLI-level unsupported review and web search flags", () => {
@@ -805,6 +858,154 @@ test("background job can be waited for", () => {
   const statusPayload = JSON.parse(status.stdout);
   assert.equal(statusPayload.status, "completed");
   assert.equal(statusPayload.waitTimedOut, false);
+});
+
+test("status --wait detects a worker that becomes inactive after waiting begins", async () => {
+  const repo = makeTempDir();
+  const data = makeTempDir();
+  initGitRepo(repo);
+  const env = { ...process.env, CLAUDE_ROUTER_DATA: data };
+  const worker = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(0), 900)"], {
+    stdio: ["ignore", "ignore", "ignore"]
+  });
+  const workerExit = new Promise((resolve, reject) => {
+    worker.on("error", reject);
+    worker.on("close", (code, signal) => resolve({ code, signal }));
+  });
+  try {
+    const processRecord = buildProcessRecord(worker.pid);
+    const job = {
+      id: "wait-detects-inactive-worker",
+      jobClass: "claude",
+      kindLabel: "Analyze",
+      mode: "analyze",
+      title: "inactive worker",
+      summary: "inactive worker",
+      workspaceRoot: repo,
+      status: "running",
+      phase: "background",
+      pid: processRecord.pid,
+      processStartTime: processRecord.processStartTime,
+      processGroup: false,
+      logFile: null
+    };
+    const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+    process.env.CLAUDE_ROUTER_DATA = data;
+    try {
+      upsertJob(repo, job);
+      writeJobFile(repo, job.id, job);
+    } finally {
+      if (previousDataDir === undefined) {
+        delete process.env.CLAUDE_ROUTER_DATA;
+      } else {
+        process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+      }
+    }
+
+    const startedAt = Date.now();
+    const statusProcess = spawn(process.execPath, [
+      SCRIPT,
+      "status",
+      "--json",
+      "--wait",
+      "--timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "100",
+      "--cwd",
+      repo,
+      job.id
+    ], { cwd: repo, env, stdio: ["ignore", "pipe", "pipe"] });
+    const status = await collectChild(statusProcess);
+    const elapsedMs = Date.now() - startedAt;
+    await workerExit;
+
+    assert.equal(status.code, 0, status.stderr);
+    assert.equal(status.signal, null);
+    const payload = JSON.parse(status.stdout);
+    assert.equal(payload.status, "failed");
+    assert.equal(payload.phase, "stale-process");
+    assert.equal(payload.waitTimedOut, false);
+    assert.match(payload.processVerification.reason, /not-running|pid-reused/);
+    assert.ok(elapsedMs < 4000, `inactive worker was not detected before the 5000ms deadline (elapsed ${elapsedMs}ms)`);
+  } finally {
+    if (processAlive(worker.pid)) {
+      worker.kill("SIGKILL");
+      await workerExit;
+    }
+  }
+});
+
+test("status --wait reports a true timeout while the worker remains active", async () => {
+  const repo = makeTempDir();
+  const data = makeTempDir();
+  initGitRepo(repo);
+  const env = { ...process.env, CLAUDE_ROUTER_DATA: data };
+  const worker = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(0), 30_000)"], {
+    stdio: ["ignore", "ignore", "ignore"]
+  });
+  const workerExit = new Promise((resolve, reject) => {
+    worker.on("error", reject);
+    worker.on("close", (code, signal) => resolve({ code, signal }));
+  });
+  try {
+    const processRecord = buildProcessRecord(worker.pid);
+    const job = {
+      id: "wait-live-worker-timeout",
+      jobClass: "claude",
+      kindLabel: "Analyze",
+      mode: "analyze",
+      title: "live worker",
+      summary: "live worker",
+      workspaceRoot: repo,
+      status: "running",
+      phase: "background",
+      pid: processRecord.pid,
+      processStartTime: processRecord.processStartTime,
+      processGroup: false,
+      logFile: null
+    };
+    const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+    process.env.CLAUDE_ROUTER_DATA = data;
+    try {
+      upsertJob(repo, job);
+      writeJobFile(repo, job.id, job);
+    } finally {
+      if (previousDataDir === undefined) {
+        delete process.env.CLAUDE_ROUTER_DATA;
+      } else {
+        process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+      }
+    }
+
+    const statusProcess = spawn(process.execPath, [
+      SCRIPT,
+      "status",
+      "--json",
+      "--wait",
+      "--timeout-ms",
+      "300",
+      "--poll-interval-ms",
+      "100",
+      "--cwd",
+      repo,
+      job.id
+    ], { cwd: repo, env, stdio: ["ignore", "pipe", "pipe"] });
+    const status = await collectChild(statusProcess);
+
+    assert.equal(status.code, 0, status.stderr);
+    assert.equal(status.signal, null);
+    const payload = JSON.parse(status.stdout);
+    assert.equal(payload.status, "running");
+    assert.equal(payload.phase, "background");
+    assert.equal(payload.waitTimedOut, true);
+    assert.equal(processAlive(worker.pid), true, "worker must still be active at the wait deadline");
+  } finally {
+    if (processAlive(worker.pid)) {
+      worker.kill("SIGKILL");
+    }
+    await workerExit;
+  }
 });
 
 test("background job can be cancelled", () => {

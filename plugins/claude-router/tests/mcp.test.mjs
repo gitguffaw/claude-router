@@ -17,8 +17,6 @@ import {
   sweepInFlightChildren
 } from "../scripts/claude-router-mcp.mjs";
 import { MCP_TOOLS } from "../scripts/lib/router-commands.mjs";
-import { PERMISSION_MODES } from "../scripts/lib/model-catalog.mjs";
-import { WRITE_CAPABLE_PERMISSION_MODES } from "../scripts/lib/routed-controls.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = path.join(ROOT, "scripts", "claude-router-mcp.mjs");
@@ -121,8 +119,12 @@ test("mcp server lists tools with closed schemas and omits always-rejected contr
     ].sort());
     const analyze = toolByName.get("claude_router_analyze");
     assert.equal(analyze.inputSchema.additionalProperties, false);
-    assert.equal(analyze.inputSchema.properties.append_system_prompt.type, "string");
-    assert.deepEqual(analyze.inputSchema.properties.betas, { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] });
+    assert.equal(analyze.inputSchema.properties.append_system_prompt, undefined);
+    assert.equal(analyze.inputSchema.properties.betas, undefined);
+    assert.equal(analyze.inputSchema.properties.model.type, "string");
+    assert.equal(analyze.inputSchema.properties.effort.type, "string");
+    assert.equal(analyze.inputSchema.properties.effort.enum, undefined);
+    assert.match(analyze.inputSchema.properties.effort.description, /Current installed-CLI choices: low, medium, high, xhigh, max/);
     assert.equal(analyze.inputSchema.properties.allow_dangerous, undefined);
     assert.equal(analyze.inputSchema.properties.allow_dangerously_skip_permissions, undefined);
     assert.equal(analyze.inputSchema.properties.dangerously_skip_permissions, undefined);
@@ -141,9 +143,12 @@ test("mcp server lists tools with closed schemas and omits always-rejected contr
     assert.equal(exec.inputSchema.properties.allow_dangerous.type, "boolean");
     assert.equal(exec.inputSchema.properties.allow_dangerously_skip_permissions.type, "boolean");
     assert.equal(exec.inputSchema.properties.dangerously_skip_permissions.type, "boolean");
-    assert.ok(exec.inputSchema.properties.permission_mode.enum.includes("acceptEdits"));
-    assert.ok(exec.inputSchema.properties.permission_mode.enum.includes("bypassPermissions"));
-    assert.ok(exec.inputSchema.properties.permission_mode.enum.includes("auto"));
+    assert.equal(exec.inputSchema.properties.permission_mode.type, "string");
+    assert.equal(exec.inputSchema.properties.permission_mode.enum, undefined);
+    assert.match(exec.inputSchema.properties.permission_mode.description, /acceptEdits.*auto.*bypassPermissions/);
+    assert.equal(exec.inputSchema.properties.future_flag.type, "string");
+    assert.match(exec.inputSchema.properties.future_flag.description, /Future Claude field/);
+    assert.ok(exec.inputSchema.properties.lean);
 
     const setup = toolByName.get("claude_router_setup");
     assert.equal(setup.inputSchema.additionalProperties, false);
@@ -165,7 +170,7 @@ test("mcp server lists tools with closed schemas and omits always-rejected contr
 
     const models = toolByName.get("claude_router_models");
     assert.equal(models.inputSchema.additionalProperties, false);
-    assert.deepEqual(models.inputSchema.properties.capability.enum, ["long_context", "ultrathink", "chrome"]);
+    assert.deepEqual(Object.keys(models.inputSchema.properties), ["cwd"]);
 
     const status = toolByName.get("claude_router_status");
     assert.equal(status.inputSchema.additionalProperties, false);
@@ -243,7 +248,7 @@ test("validateAgainstSchema rejects unknown timeout and wrong types before dispa
   const models = MCP_TOOLS.find((tool) => tool.command === "models");
   assert.throws(
     () => validateAgainstSchema(schemaFor(models), { capability: "nope" }),
-    (error) => error instanceof InvalidParamsError && /capability must be one of/.test(error.message)
+    (error) => error instanceof InvalidParamsError && /Unknown property "capability"/.test(error.message)
   );
 
   const cancel = MCP_TOOLS.find((tool) => tool.command === "cancel");
@@ -254,11 +259,8 @@ test("validateAgainstSchema rejects unknown timeout and wrong types before dispa
 
   const exec = MCP_TOOLS.find((tool) => tool.command === "exec");
   const execSchema = schemaFor(exec);
-  assert.deepEqual(
-    execSchema.properties.permission_mode.enum,
-    PERMISSION_MODES.map((mode) => mode.flag_value)
-  );
-  assert.deepEqual(WRITE_CAPABLE_PERMISSION_MODES, PERMISSION_MODES.map((mode) => mode.flag_value));
+  assert.equal(execSchema.properties.permission_mode.type, "string");
+  assert.equal(execSchema.properties.permission_mode.enum, undefined);
   validateAgainstSchema(execSchema, { prompt: "x", permission_mode: "auto" });
 });
 
@@ -276,7 +278,7 @@ test("mcp server returns invalid-params without launching companion for contract
       [4, { name: "claude_router_analyze", arguments: { cwd: repo, timeout_ms: 1 } }, /Missing required property "prompt"/],
       [5, { name: "claude_router_analyze", arguments: { cwd: repo, prompt: "x", permission_mode: "acceptEdits" } }, /permission_mode must be one of/],
       [6, { name: "claude_router_raw", arguments: { cwd: repo, args: ["mcp", 1] } }, /args\[1\] must be a string/],
-      [7, { name: "claude_router_models", arguments: { capability: "nope" } }, /capability must be one of/],
+      [7, { name: "claude_router_models", arguments: { capability: "nope" } }, /Unknown property "capability"/],
       [8, { name: "claude_router_review", arguments: { cwd: repo, scope: "src", prompt: "review target" } }, /Unknown property "scope"/],
       [9, { name: "claude_router_analyze", arguments: { cwd: repo, prompt: "x", allow_dangerous: true } }, /Unknown property "allow_dangerous"/],
       [10, { name: "claude_router_analyze", arguments: { cwd: repo, prompt: "x", timeout_ms: -1 } }, /timeout_ms must be >= 0/],
@@ -320,6 +322,33 @@ test("mcp routed tools preserve explicit empty tools string", async () => {
     const index = args.indexOf("--tools");
     assert.notEqual(index, -1, `missing --tools in ${JSON.stringify(args)}`);
     assert.equal(args[index + 1], "");
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("mcp discovers and forwards a native Claude field added after the router release", async () => {
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const result = await request(proc, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "claude_router_analyze",
+        arguments: { cwd: repo, prompt: "inspect", future_flag: "future-value" }
+      }
+    });
+    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
+    const payload = JSON.parse(result.result.content[0].text);
+    const index = payload.result.args.indexOf("--future-flag");
+    assert.notEqual(index, -1);
+    assert.equal(payload.result.args[index + 1], "future-value");
   } finally {
     proc.kill("SIGTERM");
   }
@@ -444,7 +473,7 @@ test("mcp valid analyze call still succeeds with closed schema", async () => {
   }
 });
 
-test("mcp exec accepts auto permission_mode from shared catalog", async () => {
+test("mcp exec accepts a live permission_mode without freezing an enum", async () => {
   const bin = makeTempDir();
   const repo = makeTempDir();
   installFakeClaude(bin);
@@ -454,11 +483,9 @@ test("mcp exec accepts auto permission_mode from shared catalog", async () => {
     await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     const list = await request(proc, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
     const execTool = list.result.tools.find((tool) => tool.name === "claude_router_exec");
-    assert.deepEqual(
-      execTool.inputSchema.properties.permission_mode.enum,
-      PERMISSION_MODES.map((mode) => mode.flag_value)
-    );
-    assert.ok(execTool.inputSchema.properties.permission_mode.enum.includes("auto"));
+    assert.equal(execTool.inputSchema.properties.permission_mode.type, "string");
+    assert.equal(execTool.inputSchema.properties.permission_mode.enum, undefined);
+    assert.match(execTool.inputSchema.properties.permission_mode.description, /Current installed-CLI choices/);
 
     const result = await request(proc, {
       jsonrpc: "2.0",
@@ -491,7 +518,7 @@ test("mcp tools/call is concurrent: fast response arrives before slow", async ()
   try {
     await request(proc, { jsonrpc: "2.0", id: 0, method: "initialize", params: {} });
     const pending = collectResponses(proc, 2, 20000);
-    // Slow: fake claude SLEEP path (~5s). Fast: models --static skips claude.
+    // Slow: fake claude SLEEP path (~5s). Fast: models only reads local help.
     writeLine(proc, JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
@@ -507,7 +534,7 @@ test("mcp tools/call is concurrent: fast response arrives before slow", async ()
       method: "tools/call",
       params: {
         name: "claude_router_models",
-        arguments: { static: true }
+        arguments: {}
       }
     }));
     const responses = await pending;
@@ -597,7 +624,7 @@ test("mcp outer timeout returns -32000 and server remains responsive", async () 
       method: "tools/call",
       params: {
         name: "claude_router_models",
-        arguments: { static: true }
+        arguments: {}
       }
     });
     assert.equal(stillAlive.error, undefined, JSON.stringify(stillAlive.error ?? {}));
@@ -660,7 +687,7 @@ test("mcp tools/call concurrency queue: 20 fast calls all respond", async () => 
         method: "tools/call",
         params: {
           name: "claude_router_models",
-          arguments: { static: true }
+          arguments: {}
         }
       }));
     }
@@ -748,7 +775,7 @@ test("mcp absolute cwd is unchanged (regression pin)", async () => {
 test("mcp omitted cwd defaults to plugin ROOT (regression pin)", async () => {
   const bin = makeTempDir();
   installFakeClaude(bin);
-  // models --static is the cheapest tool; omits cwd so spawn uses ROOT and --cwd is absent.
+  // models is a cheap local-help read; omits cwd so spawn uses ROOT and --cwd is absent.
   const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
   try {
     await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
@@ -758,7 +785,7 @@ test("mcp omitted cwd defaults to plugin ROOT (regression pin)", async () => {
       method: "tools/call",
       params: {
         name: "claude_router_models",
-        arguments: { static: true }
+        arguments: {}
       }
     });
     assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
@@ -857,4 +884,3 @@ test("mcp SIGTERM sweeps in-flight companion when harness can observe child deat
     }
   }
 });
-

@@ -55,7 +55,7 @@ Available modes:
 - `result`: fetch a stored job result
 - `cancel`: cancel a background job
 - `version`: show Claude Router and installed Claude CLI versions
-- `models`: return live Claude model selectors plus curated effort levels, permission modes, and modifier flags
+- `models`: read installed help and return current model examples, CLI fields and choices, and lean-profile availability
 - `raw`: run exact Claude CLI args with mutation and dangerous-permission guardrails
 - `cli`: alias for guarded raw Claude CLI passthrough
 
@@ -70,35 +70,29 @@ node scripts/claude-companion.mjs plan --cwd /path/to/project --background "plan
 node scripts/claude-companion.mjs status --cwd /path/to/project
 node scripts/claude-companion.mjs result --cwd /path/to/project <job-id>
 node scripts/claude-companion.mjs models
-node scripts/claude-companion.mjs models --capability ultrathink
+node scripts/claude-companion.mjs analyze --lean --model fable --effort max "find the narrowest fix"
 ```
 
 ## Model Catalog Output
 
-The `models` mode queries the installed Claude CLI help for accepted `--model` selectors, then returns a structured catalog with these sections:
+The `models` mode reads the installed Claude CLI help every time, then returns a structured catalog with these sections:
 
-- **discovery**: Live model discovery status, Claude CLI version, selectors, aliases, full names, and any discovery error
-- **models**: Selectors accepted by the installed Claude CLI plus curated fallback selectors
-- **tiers**: Model tiers (haiku, sonnet, opus) with context window, long-context and ultrathink support, and cost tier
-- **effort_levels**: Reasoning depth controls (low, medium, high, xhigh, max) with token budgets
-- **modifiers**: Router controls and Claude session flags (`--long-context`, `--ultrathink`, `--chrome`, `--no-chrome`, `--bare`) with tier compatibility. `--long-context` and `--ultrathink` are router-level conveniences; `--chrome`, `--no-chrome`, and `--bare` pass through to Claude.
-- **permission_modes**: Claude session permission controls with activation rules
-- **presets**: Shortcut flags (`--best` resolves to opus)
+- **discovery**: Live status, Claude version, documented model examples, and the explicit completeness limit
+- **models**: Model aliases and full names found in installed help; no router fallback selectors
+- **cli_fields**: Every discovered top-level Claude flag, including current choices and descriptions
+- **effort_levels** and **permission_modes**: Choices parsed from installed help
+- **lean_profiles**: Availability of OAuth safe mode and API-key bare mode
+- **tiers**: Empty compatibility section; the router does not infer a capability matrix from model family names
+- **modifiers**: Live session flags plus clearly labeled legacy router conveniences
 
-### Permission Modes
+Claude help documents model examples, not a guaranteed exhaustive registry. Pass explicit `--model` and `--effort` strings through; do not enforce a copied list. Static mode and model capability filtering are intentionally unavailable because they become stale.
 
-| Mode | Flag Value | Requires `--allow-dangerous` |
-| --- | --- | --- |
-| default | `default` | No |
-| acceptEdits | `acceptEdits` | No |
-| auto | `auto` | No |
-| plan | `plan` | No |
-| dontAsk | `dontAsk` | No |
-| bypassPermissions | `bypassPermissions` | Yes |
+## Lean Profiles
 
-### Capability Filter
-
-Pass `--capability <value>` to filter known tiers and model selectors. Valid values: `long_context`, `ultrathink`, `chrome`. Unknown values are rejected with an error. Use `--static` to skip live CLI help discovery.
+- `--lean` auto-detects the authentication path.
+- `--lean=oauth` uses Claude `--safe-mode`, preserving subscription/OAuth while disabling customizations.
+- `--lean=api` uses Claude `--bare`, which requires API/provider credentials and does not read OAuth or keychain credentials.
+- Lean read-only routes default to `Bash,Read`; `exec` defaults to `Bash,Read,Edit,Write`. Explicit `--tools` and `--system-prompt` override the defaults.
 
 ## MCP Server
 
@@ -112,12 +106,12 @@ The MCP server exposes the `claude_router_*` tools for setup, surface discovery,
 
 ## Routing Rules
 
-- Use `models` to discover live model selectors, known model tiers, effort levels, permission modes, and modifiers before selecting Claude controls for a task.
+- Use `models` to discover the installed model examples, native fields, effort and permission choices, and lean profiles before selecting Claude controls.
 - Run `setup` before the first delegated task when local Claude availability is unknown.
 - Use `analyze`, `plan`, and `review` only for read-only work.
 - Use `exec` only when the user explicitly wants Claude to edit files.
 - Use `surface` or `help` before relying on less-common Claude CLI behavior.
-- Use `raw` only for Claude CLI features not covered by curated modes.
+- Use `raw` only for Claude CLI commands not covered by managed modes.
 - Do not use dangerous permission bypass unless the user explicitly accepts that risk.
 - If Claude Router fails, report the failure and do not replace Claude's output with an invented result.
 

@@ -1,6 +1,6 @@
 ---
 description: Run a read-only Claude Router code review job
-argument-hint: '[--background] [--timeout-ms <ms>] [--model <selector>] [--effort low|medium|high|xhigh|max] [focus ...]'
+argument-hint: '[--background] [--lean[=auto|oauth|api]] [--model <selector>] [--effort <value>] [live Claude flags] [focus ...]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---

@@ -17,6 +17,14 @@ import { generateJobId, readJobFile, resolveJobFile, transitionJob } from "./lib
 import { appendLogLine, cancelledJobResult, createJobLogFile, isCancelInProgress, runTrackedJob, TERMINAL_JOB_STATUSES } from "./lib/tracked-jobs.mjs";
 import { readGitStatus, resolveWorkspaceRoot } from "./lib/workspace.mjs";
 import { getModelCatalog } from "./lib/model-catalog.mjs";
+import {
+  assertLiveControlSafety,
+  discoverClaudeControls,
+  dynamicRoutedControls,
+  liveControlParseConfig,
+  nativeArgsFromParsedOptions
+} from "./lib/live-controls.mjs";
+import { parseClaudeHelp } from "./lib/claude-surface.mjs";
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -163,17 +171,18 @@ function routerHelpPayload() {
     ],
     commands: ROUTER_COMMANDS,
     model_controls: [
-      "--model <selector> passes any selector accepted by the installed Claude CLI, including aliases discovered from Claude help such as fable, opus, or sonnet.",
-      "--best resolves to --opus.",
-      "--sonnet, --opus, and --haiku are compatibility shortcuts.",
-      "--effort <low|medium|high|xhigh|max> controls reasoning depth.",
+      "--model <selector> and --effort <value> pass opaque values to the installed Claude CLI; run models to inspect its current examples and choices.",
+      "--lean[=auto|oauth|api] starts a minimal-context profile. OAuth uses --safe-mode; API credentials use --bare.",
+      "--tools and --system-prompt override the lean profile's minimal defaults.",
+      "--best, --sonnet, --opus, --haiku, --long-context, and --ultrathink remain legacy router conveniences; prefer live native selectors and fields.",
       "--timeout-ms <milliseconds> bounds managed routed print jobs; use 0 to disable the managed timeout for that job."
     ],
     examples: [
       "claude-companion.mjs version",
       "claude-companion.mjs models",
       "claude-companion.mjs help mcp add",
-      "claude-companion.mjs analyze --model fable \"inspect this repository\"",
+      "claude-companion.mjs analyze --lean --model fable --effort max \"inspect this repository\"",
+      "claude-companion.mjs exec --lean=api --model fable --tools Bash,Read,Edit,Write \"implement the narrow fix\"",
       "claude-companion.mjs adversarial-review \"challenge this design\"",
       "claude-companion.mjs exec --background \"implement the narrow fix\""
     ]
@@ -234,8 +243,10 @@ function renderSurfacePayload(payload) {
     `Claude CLI: ${commandText(payload.version)}`,
     "",
     "Router commands:",
-    `- Curated: ${payload.router.curatedTools.join(", ")}`,
-    `- Passthrough: ${payload.router.fullSurfaceTools.join(", ")}`,
+    `- Managed work: ${payload.router.managedWorkTools.join(", ")}`,
+    `- Live discovery: ${payload.router.discoveryTools.join(", ")}`,
+    `- Job lifecycle: ${payload.router.jobTools.join(", ")}`,
+    `- Guarded full surface: ${payload.router.fullSurfaceTools.join(", ")}`,
     `- ${payload.router.note}`
   ];
   if (payload.help.stdout || payload.help.stderr || payload.help.error) {
@@ -248,8 +259,8 @@ function hasFlag(args, ...flags) {
   return args.some((arg) => flags.includes(arg) || flags.some((flag) => arg.startsWith(`${flag}=`)));
 }
 
-function rawCommandClassification(args) {
-  const parsed = parseClaudeArgv(args);
+function rawCommandClassification(args, parserOptions = {}) {
+  const parsed = parseClaudeArgv(args, parserOptions);
   const [first, second] = parsed.commandPath;
   const third = parsed.positionals[0];
   const allFlags = [...parsed.globalFlags, ...parsed.flags];
@@ -273,22 +284,36 @@ function rawCommandClassification(args) {
       first === "project" && second === "purge" && !dryRun
     ].some(Boolean);
   }
-  return { helpOnly, dryRun, dangerous, mutating, commandPath: parsed.commandPath, unknown: parsed.unknown };
+  const safeRead = [
+    first === "auth" && second === "status",
+    first === "doctor",
+    first === "mcp" && ["get", "list"].includes(second),
+    pluginCommand && ["details", "list", "validate"].includes(second),
+    first === "auto-mode" && ["config", "critique", "defaults"].includes(second)
+  ].some(Boolean);
+  const hasUnknownSurface = parsed.unknown.commands.length > 0 || parsed.unknown.flags.length > 0;
+  const unclassifiedCommand = !helpOnly && !mutating && (
+    (parsed.commandPath.length > 0 && !safeRead) || hasUnknownSurface
+  );
+  return { helpOnly, dryRun, dangerous, mutating, unclassifiedCommand, commandPath: parsed.commandPath, unknown: parsed.unknown };
 }
 
-function assertRawClaudeArgs(args, options = {}) {
+function assertRawClaudeArgs(args, options = {}, parserOptions = {}) {
   if (!args.length) {
     throw new Error("Provide Claude CLI args after --.");
   }
   if (args[0] === "claude") {
     throw new Error("Do not include the claude binary name; provide only Claude CLI args.");
   }
-  const classification = rawCommandClassification(args);
+  const classification = rawCommandClassification(args, parserOptions);
   if (classification.dangerous && !options["allow-dangerous"]) {
     throw new Error("Raw Claude command requests dangerous permission bypass. Re-run with --allow-dangerous only if the user explicitly accepts that risk.");
   }
   if (classification.mutating && !options["allow-mutating"]) {
     throw new Error("Raw Claude command may mutate Claude/project configuration. Re-run with --allow-mutating only when the user explicitly requested this action.");
+  }
+  if (classification.unclassifiedCommand && !options["allow-mutating"]) {
+    throw new Error("Raw Claude command is present in the live CLI but has no router safety classification yet. Re-run with --allow-mutating only when the user explicitly requested it.");
   }
   return classification;
 }
@@ -302,9 +327,11 @@ async function handleSurface(argv) {
     router: {
       name: "claude-router",
       version: PLUGIN_VERSION,
-      curatedTools: ["setup", "analyze", "plan", "exec", "review", "adversarial-review", "ultrareview", "status", "result", "cancel", "models"],
-      fullSurfaceTools: ["surface", "help", "raw", "cli", "version"],
-      note: "Use curated tools for managed print-mode jobs. Use help/raw for Claude CLI features not represented as curated tools."
+      managedWorkTools: ["analyze", "plan", "exec", "review", "adversarial-review", "ultrareview"],
+      discoveryTools: ["setup", "models", "surface", "help", "version"],
+      jobTools: ["status", "result", "cancel"],
+      fullSurfaceTools: ["raw", "cli"],
+      note: "Managed work modes enforce job and permission boundaries. Discovery reads the installed CLI. Raw access keeps mutation and permission-bypass guardrails."
     },
     version: commandPayload(version),
     help: commandPayload(help)
@@ -342,7 +369,15 @@ async function handleRawClaude(argv) {
   });
   const cwd = resolveCwd(options);
   const args = positionals;
-  const classification = assertRawClaudeArgs(args, options);
+  const help = runCommand("claude", ["--help"], { cwd });
+  const helpText = help.status === 0 && !help.error ? (help.stdout || help.stderr) : "";
+  const liveControls = discoverClaudeControls(helpText);
+  const parsedHelp = parseClaudeHelp(helpText);
+  const classification = assertRawClaudeArgs(args, options, {
+    valueFlags: liveControls.filter((control) => control.kind === "value").flatMap((control) => [control.option, ...control.optionAliases]),
+    booleanFlags: liveControls.filter((control) => control.kind !== "value").flatMap((control) => [control.option, ...control.optionAliases]),
+    commands: parsedHelp.commands.flatMap((command) => [command.name, ...command.aliases])
+  });
   const timeoutMs = parseNonNegativeTimeoutMs(options["timeout-ms"], 300000);
   const result = await runProcess("claude", args, { cwd, env: process.env, timeoutMs });
   const payload = { ...commandPayload(result), classification };
@@ -378,18 +413,51 @@ async function runStoredJob(workspaceRoot, jobId, options = {}) {
 }
 
 async function handleRouted(mode, argv) {
+  // Claude's top-level surface is binary-scoped, so discover it before parsing
+  // routed values. A preliminary --cwd parse could mistake a quoted flag-like
+  // value (for example a system prompt equal to "--cwd") for router control.
+  const liveHelpResult = runCommand("claude", ["--help"], { cwd: process.cwd() });
+  const liveHelp = liveHelpResult.status === 0 && !liveHelpResult.error
+    ? (liveHelpResult.stdout || liveHelpResult.stderr)
+    : "";
+  const allLiveControls = dynamicRoutedControls(liveHelp);
+  const knownOptions = new Set([
+    ...ROUTED_VALUE_OPTIONS,
+    ...ROUTED_OPTIONAL_VALUE_OPTIONS,
+    ...ROUTED_BOOLEAN_OPTIONS
+  ]);
+  const extraLiveControls = allLiveControls.filter((control) => !knownOptions.has(control.option));
+  const liveConfig = liveControlParseConfig(extraLiveControls);
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: COMMON_VALUES,
-    booleanOptions: COMMON_BOOLEANS,
-    repeatableOptions: ROUTED_REPEATABLE_OPTIONS,
-    optionalValueOptions: ROUTED_OPTIONAL_VALUE_OPTIONS
+    valueOptions: [...COMMON_VALUES, ...liveConfig.valueOptions],
+    booleanOptions: [...COMMON_BOOLEANS, ...liveConfig.booleanOptions],
+    repeatableOptions: [...ROUTED_REPEATABLE_OPTIONS, ...liveConfig.repeatableOptions],
+    optionalValueOptions: [...ROUTED_OPTIONAL_VALUE_OPTIONS, ...liveConfig.optionalValueOptions],
+    aliasMap: liveConfig.aliasMap
   });
   normalizeRepeatables(options);
+  for (const key of liveConfig.repeatableOptions) {
+    if (options[key] && !Array.isArray(options[key])) {
+      options[key] = [options[key]];
+    }
+  }
+  assertLiveControlSafety(options, extraLiveControls);
   const cwd = resolveCwd(options);
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const prompt = positionals.join(" ");
   const gitBefore = readGitStatus(workspaceRoot);
-  const request = buildRouterRequest({ mode, prompt, options, gitBefore });
+  const auth = options.lean ? getClaudeAuthStatus(cwd) : null;
+  const availableFlags = liveHelp
+    ? new Set(discoverClaudeControls(liveHelp).map((control) => control.flag))
+    : null;
+  const request = buildRouterRequest({
+    mode,
+    prompt,
+    options,
+    gitBefore,
+    runtime: { auth, env: process.env, availableFlags },
+    dynamicClaudeArgs: nativeArgsFromParsedOptions(options, extraLiveControls)
+  });
   const contextPack = createContextPack(workspaceRoot, request);
   const jobId = generateJobId(mode);
   const logFile = createJobLogFile(workspaceRoot, jobId, `Claude ${request.workflow}`);
@@ -502,23 +570,24 @@ async function handleModels(argv) {
     valueOptions: ["capability", "cwd"],
     booleanOptions: ["json", "static"]
   });
+  if (options.static) {
+    throw new Error("--static was removed: the models catalog now always reads the installed Claude CLI so it cannot silently go stale.");
+  }
   const cwd = resolveCwd(options);
   let claudeHelp = "";
   let claudeVersion = null;
-  let discoveryStatus = options.static ? "not-run" : null;
+  let discoveryStatus = null;
   let discoveryError = null;
-  if (!options.static) {
-    const version = runCommand("claude", ["--version"], { cwd });
-    if (version.status === 0 && !version.error) {
-      claudeVersion = commandText(commandPayload(version));
-    }
-    const help = runCommand("claude", ["--help"], { cwd });
-    if (help.status === 0 && !help.error) {
-      claudeHelp = help.stdout || help.stderr;
-    } else {
-      discoveryStatus = "unavailable";
-      discoveryError = commandText(commandPayload(help));
-    }
+  const version = runCommand("claude", ["--version"], { cwd });
+  if (version.status === 0 && !version.error) {
+    claudeVersion = commandText(commandPayload(version));
+  }
+  const help = runCommand("claude", ["--help"], { cwd });
+  if (help.status === 0 && !help.error) {
+    claudeHelp = help.stdout || help.stderr;
+  } else {
+    discoveryStatus = "unavailable";
+    discoveryError = commandText(commandPayload(help));
   }
   const catalog = getModelCatalog({
     capability: options.capability || null,

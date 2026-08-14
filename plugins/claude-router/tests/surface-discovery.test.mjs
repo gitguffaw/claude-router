@@ -23,6 +23,7 @@ Commands:
 Options:
   -p, --print                 Print and exit
   --permission-mode <mode>    Permission mode
+                              (choices: "plan", "manual")
   --allowedTools <tools...>   Allowed tools
   --always-approve            Skip approval prompts
       --settings should not be parsed from wrapped descriptions
@@ -36,7 +37,9 @@ Options:
   assert.deepEqual(parsed.flags.map((flag) => flag.names), [["-p", "--print"], ["--permission-mode"], ["--allowedTools"], ["--always-approve"]]);
   assert.equal(parsed.flags[1].requiresValue, true);
   assert.deepEqual(parsed.flags[1].valueHint, "mode");
+  assert.match(parsed.flags[1].description, /choices: "plan", "manual"/);
   assert.equal(parsed.flags[2].requiresValue, true);
+  assert.equal(parsed.flags[2].repeatable, true);
 });
 
 test("captureClaudeSurface builds a V2 surface snapshot from fake claude help", () => {

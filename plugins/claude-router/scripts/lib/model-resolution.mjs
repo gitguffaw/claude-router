@@ -1,5 +1,3 @@
-const VALID_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
-
 function parseTimeoutMs(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -11,7 +9,38 @@ function parseTimeoutMs(value) {
   return parsed;
 }
 
-export function resolveClaudeControls(options = {}) {
+function leanSelection(value, runtime) {
+  if (!value) {
+    return null;
+  }
+  const requested = value === true ? "auto" : String(value).trim().toLowerCase();
+  if (!["auto", "oauth", "api"].includes(requested)) {
+    throw new Error(`Invalid --lean value "${value}". Use auto, oauth, or api.`);
+  }
+  if (requested !== "auto") {
+    return requested;
+  }
+  const providerCredentials = [
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY"
+  ].some((name) => runtime.env?.[name]);
+  if (runtime.env?.ANTHROPIC_API_KEY || providerCredentials) {
+    return "api";
+  }
+  if (runtime.auth?.loggedIn || /claude\.ai|oauth/i.test(runtime.auth?.authMethod ?? "")) {
+    return "oauth";
+  }
+  throw new Error("--lean could not determine the active Claude authentication path. Use --lean=oauth for subscription/OAuth or --lean=api for API-key bare mode.");
+}
+
+function assertLeanFlagAvailable(flag, runtime) {
+  if (runtime.availableFlags && !runtime.availableFlags.has(flag)) {
+    throw new Error(`The installed Claude CLI does not advertise ${flag}; update Claude or choose a different lean authentication path.`);
+  }
+}
+
+export function resolveClaudeControls(options = {}, runtime = {}) {
   let model = options.model ? String(options.model).trim() : null;
   if (options.best) {
     model = "opus";
@@ -29,13 +58,37 @@ export function resolveClaudeControls(options = {}) {
     model = model === "sonnet" ? "sonnet[1m]" : "opus[1m]";
   }
 
-  const effort = options.effort ? String(options.effort).trim().toLowerCase() : null;
-  if (effort && !VALID_EFFORTS.has(effort)) {
-    throw new Error(`Unsupported Claude effort "${options.effort}". Use one of: low, medium, high, xhigh, max.`);
-  }
+  // Model and effort values are intentionally opaque pass-through strings. The
+  // installed Claude CLI, not the router release, owns their accepted values.
+  const effort = options.effort ? String(options.effort).trim() : null;
   const permissionMode = options["dangerously-skip-permissions"] || options["bypass-permissions"]
     ? "bypassPermissions"
     : options["permission-mode"] || null;
+
+  const lean = leanSelection(options.lean, runtime);
+  let safeMode = Boolean(options["safe-mode"]);
+  let bare = Boolean(options.bare);
+  if (safeMode && bare) {
+    throw new Error("--safe-mode and --bare are different authentication paths and cannot be combined.");
+  }
+  if (lean === "oauth") {
+    assertLeanFlagAvailable("--safe-mode", runtime);
+    if (bare) {
+      throw new Error("--lean=oauth conflicts with --bare. OAuth lean mode uses Claude --safe-mode.");
+    }
+    safeMode = true;
+  } else if (lean === "api") {
+    assertLeanFlagAvailable("--bare", runtime);
+    if (safeMode) {
+      throw new Error("--lean=api conflicts with --safe-mode. API lean mode uses Claude --bare.");
+    }
+    bare = true;
+  }
+
+  const toolsSpecified = Object.prototype.hasOwnProperty.call(options, "tools");
+  const defaultLeanTools = runtime.mode === "exec" ? "Bash,Read,Edit,Write" : "Bash,Read";
+  const tools = toolsSpecified ? options.tools : lean ? defaultLeanTools : [];
+  const systemPrompt = options["system-prompt"] || (lean ? "You are a concise expert coding assistant." : null);
 
   return {
     model: model || null,
@@ -43,14 +96,14 @@ export function resolveClaudeControls(options = {}) {
     permissionMode,
     chrome: Boolean(options.chrome),
     noChrome: Boolean(options["no-chrome"]),
-    bare: Boolean(options.bare),
+    bare,
     ultrathink: Boolean(options.ultrathink),
     agent: options.agent || null,
     agents: options.agents || null,
     allowedTools: options["allowed-tools"] ?? [],
     disallowedTools: options["disallowed-tools"] ?? [],
     // Preserve explicit empty string for --tools "" (disable all built-in tools).
-    tools: options.tools === "" ? "" : (options.tools ?? []),
+    tools: options.tools === "" ? "" : tools,
     appendSystemPrompt: options["append-system-prompt"] || null,
     axScreenReader: Boolean(options["ax-screen-reader"]),
     betas: options.betas ?? [],
@@ -78,13 +131,20 @@ export function resolveClaudeControls(options = {}) {
     remoteControlSessionNamePrefix: options["remote-control-session-name-prefix"] || null,
     replayUserMessages: Boolean(options["replay-user-messages"]),
     resume: options.resume || null,
-    safeMode: Boolean(options["safe-mode"]),
+    safeMode,
     sessionId: options["session-id"] || null,
-    systemPrompt: options["system-prompt"] || null,
+    systemPrompt,
     tmux: options.tmux || null,
     verbose: Boolean(options.verbose),
     worktree: options.worktree || null,
     allowDangerouslySkipPermissions: Boolean(options["allow-dangerously-skip-permissions"]),
+    leanProfile: lean ? {
+      id: lean,
+      authPath: lean === "oauth" ? "OAuth/subscription" : "API key or apiKeyHelper",
+      isolationFlag: lean === "oauth" ? "--safe-mode" : "--bare",
+      defaultToolsApplied: !toolsSpecified,
+      defaultSystemPromptApplied: !options["system-prompt"]
+    } : null,
     timeoutMs: parseTimeoutMs(options["timeout-ms"] ?? null)
   };
 }

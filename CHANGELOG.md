@@ -18,6 +18,10 @@ All notable changes to Claude Router are documented here.
 - Removed stale static catalog mode and model capability filtering, both of which could silently omit new models or misstate changing capabilities.
 - Hardened raw passthrough so live-but-unclassified future commands require explicit mutation consent instead of defaulting to safe.
 
+### Fixed
+
+- Made `status --wait` reconcile the tracked worker and foreground companion on every polling cycle, so an inactive execution owner transitions atomically to `failed` / `stale-process` with `waitTimedOut: false` instead of remaining falsely `running` until the deadline.
+
 ## [2.3.1] — 2026-07-11
 
 ### Fixed

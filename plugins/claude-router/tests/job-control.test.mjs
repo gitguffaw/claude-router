@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { makeTempDir } from "./helpers.mjs";
+import { handleStatus } from "../scripts/lib/job-commands.mjs";
 import { readFullJob, resolveJob, sortJobsNewestFirst } from "../scripts/lib/job-control.mjs";
 import { upsertJob, writeJobFile } from "../scripts/lib/state.mjs";
 
@@ -92,4 +93,30 @@ test("readFullJob falls back to the index record when the job file is missing", 
     assert.equal(job.id, "claude-index-only");
     assert.equal(job.status, "running");
   });
+});
+
+test("handleStatus --wait rejects whitespace-only timeout values instead of zeroing them", async () => {
+  const dataDir = makeTempDir();
+  const cwd = makeTempDir();
+  const previous = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    upsertJob(cwd, { id: "claude-wait-target", status: "completed", updatedAt: "2026-01-01T00:00:00.000Z" });
+    await assert.rejects(
+      handleStatus(cwd, { reference: "claude-wait-target", wait: true, timeoutMs: " " }),
+      /Invalid timeout/
+    );
+    await assert.rejects(
+      handleStatus(cwd, { reference: "claude-wait-target", wait: true, pollIntervalMs: " " }),
+      /Invalid poll interval/
+    );
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previous;
+    }
+    cleanupDir(dataDir);
+    cleanupDir(cwd);
+  }
 });

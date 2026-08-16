@@ -63,7 +63,8 @@ function parseNonNegativeTimeoutMs(value, defaultValue) {
   if (value === null || value === undefined || value === "") {
     return defaultValue;
   }
-  const parsed = Number(value);
+  // Number(" ") coerces to 0, which would silently disable the timeout.
+  const parsed = typeof value === "string" && value.trim() === "" ? NaN : Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new Error(`Invalid timeout "${value}". Use a non-negative millisecond value.`);
   }

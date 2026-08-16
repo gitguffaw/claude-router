@@ -2,7 +2,8 @@ function parseTimeoutMs(value) {
   if (value === null || value === undefined || value === "") {
     return null;
   }
-  const parsed = Number(value);
+  // Number(" ") coerces to 0, which would silently disable the managed timeout.
+  const parsed = typeof value === "string" && value.trim() === "" ? NaN : Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new Error(`Invalid timeout "${value}". Use a non-negative millisecond value.`);
   }

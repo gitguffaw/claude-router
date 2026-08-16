@@ -24,6 +24,7 @@ test("timeout-ms accepts non-negative milliseconds and rejects everything else",
   assert.equal(resolveClaudeControls({ "timeout-ms": "" }).timeoutMs, null);
   assert.throws(() => resolveClaudeControls({ "timeout-ms": "abc" }), /Invalid timeout/);
   assert.throws(() => resolveClaudeControls({ "timeout-ms": "-5" }), /Invalid timeout/);
+  assert.throws(() => resolveClaudeControls({ "timeout-ms": " " }), /Invalid timeout/);
 });
 
 test("invalid --lean value fails with the accepted choices", () => {

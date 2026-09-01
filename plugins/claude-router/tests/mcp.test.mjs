@@ -385,7 +385,7 @@ test("mcp prompt argument boundary treats dash-leading prompts as data", async (
       assert.equal(payload.request.controls.debug, null);
       assert.equal(payload.request.controls.tools.length === 0 || payload.request.controls.tools === "", true);
       const claudeArgs = payload.result.args;
-      assert.equal(claudeArgs.at(-1), payload.request.prompt);
+      assert.equal(claudeArgs[claudeArgs.indexOf("-p") + 1], payload.request.prompt);
       assert.match(payload.request.prompt, new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     }
 
@@ -411,7 +411,7 @@ test("mcp prompt argument boundary treats dash-leading prompts as data", async (
     const structuredArgs = structuredPayload.result.args;
     assert.ok(structuredArgs.includes("--model"));
     assert.ok(structuredArgs.includes("sonnet"));
-    assert.equal(structuredArgs.at(-1), structuredPayload.request.prompt);
+    assert.equal(structuredArgs[structuredArgs.indexOf("-p") + 1], structuredPayload.request.prompt);
     assert.match(structuredPayload.request.prompt, /--looks-like-flag but is prompt/);
   } finally {
     proc.kill("SIGTERM");

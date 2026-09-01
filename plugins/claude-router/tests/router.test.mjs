@@ -111,7 +111,8 @@ test("managed print jobs pass through advanced claude controls", () => {
     }
   });
   const args = buildClaudePrintArgs(request);
-  assert.deepEqual(args.slice(0, 4), ["-p", "--output-format", "stream-json", "--permission-mode"]);
+  assert.deepEqual(args.slice(0, 5), ["-p", request.prompt, "--output-format", "stream-json", "--permission-mode"]);
+  assert.equal(args.filter((arg) => arg === request.prompt).length, 1);
   assert.ok(args.includes("--allowedTools"));
   assert.ok(args.includes("Bash(git *)"));
   assert.ok(args.includes("--mcp-config"));

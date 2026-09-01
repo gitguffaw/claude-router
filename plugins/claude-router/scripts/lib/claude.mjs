@@ -102,7 +102,9 @@ function appendBoolean(args, flag, enabled) {
 }
 
 export function buildClaudePrintArgs(request) {
-  const args = ["-p", "--output-format", request.outputFormat ?? "json", "--permission-mode", request.permissionMode ?? "default"];
+  // Claude Code requires the print prompt to immediately follow -p. Leaving it
+  // trailing makes the next flag appear to be the prompt and rejects the job.
+  const args = ["-p", request.prompt, "--output-format", request.outputFormat ?? "json", "--permission-mode", request.permissionMode ?? "default"];
   const controls = request.controls ?? {};
   appendValue(args, "--model", controls.model);
   appendValue(args, "--effort", controls.effort);
@@ -155,7 +157,6 @@ export function buildClaudePrintArgs(request) {
   appendRepeatable(args, "--mcp-config", controls.mcpConfigs);
   appendRepeatable(args, "--add-dir", controls.addDirs);
   args.push(...(controls.dynamicClaudeArgs ?? []).map(String));
-  args.push(request.prompt);
   return args;
 }
 

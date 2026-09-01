@@ -55,7 +55,7 @@ if (args[0] === "ultrareview") {
   process.exit(0);
 }
 if (args.includes("-p")) {
-  const prompt = args[args.length - 1] || "";
+  const prompt = args[args.indexOf("-p") + 1] || "";
   if (prompt.includes("SLEEP")) {
     if (process.env.FAKE_CLAUDE_PID_FILE) {
       fs.writeFileSync(process.env.FAKE_CLAUDE_PID_FILE, String(process.pid));

@@ -4,6 +4,8 @@ All notable changes to Claude Router are documented here.
 
 ## Unreleased
 
+## [2.5.0] — 2026-09-02
+
 ### Changed
 
 - Routed native Claude flags now parse and emit from one catalog (router-owned controls plus live `claude --help`, with a parse seed when help is down). The camelCase control bag and per-flag `append*` list are gone.

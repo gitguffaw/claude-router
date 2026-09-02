@@ -1,6 +1,6 @@
 # Claude Router
 
-Current release: `v2.4.0`
+Current release: `v2.5.0`
 
 Claude Router lets one coding agent delegate a bounded task to the Claude Code CLI already installed on your computer. Its primary host surfaces are the **Codex app/CLI** and **Google Antigravity/Antigravity CLI (`agy`)**. An optional Claude Code adapter exposes the same managed modes as slash commands, but Claude Code does not need this router to run its own native sessions or subagents.
 

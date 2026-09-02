@@ -474,7 +474,7 @@ test("routed parser preserves repeatable values, inline equals, and bare optiona
   const args = payload.result.args;
   assert.deepEqual(args.slice(args.indexOf("--debug"), args.indexOf("--debug") + 1), ["--debug"]);
   assert.equal(args[args.indexOf("--append-system-prompt") + 1], "A=B");
-  assert.equal(args.filter((arg) => arg === "--allowedTools").length, 2);
+  assert.equal(args.filter((arg) => arg === "--allowed-tools").length, 2);
   assert.ok(args.includes("Read"));
   assert.ok(args.includes("Bash(git *)"));
   assert.match(payload.request.userRequest, /inspect parser/);

@@ -1,4 +1,5 @@
 import { resolveClaudeControls } from "./model-resolution.mjs";
+import { NATIVE_SEED_CONTROLS, ROUTER_OWNED_OPTIONS } from "./routed-controls.mjs";
 
 const MODE_CONFIG = {
   analyze: { workflow: "Analyze", write: false, defaultPermissionMode: "plan", outputFormat: "json" },
@@ -89,7 +90,25 @@ function buildPrompt(mode, prompt, controls) {
   return parts.join("\n");
 }
 
-export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = null, runtime = {}, dynamicClaudeArgs = [] }) {
+function nativeOptionsFrom(options) {
+  const nativeOptions = {};
+  for (const [key, value] of Object.entries(options)) {
+    if (ROUTER_OWNED_OPTIONS.has(key)) {
+      continue;
+    }
+    nativeOptions[key] = value;
+  }
+  return nativeOptions;
+}
+
+export function buildRouterRequest({
+  mode,
+  prompt,
+  options = {},
+  gitBefore = null,
+  runtime = {},
+  nativeControls = NATIVE_SEED_CONTROLS
+}) {
   const config = MODE_CONFIG[mode];
   if (!config) {
     throw new Error(`Unsupported Claude Router mode "${mode}".`);
@@ -103,7 +122,7 @@ export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = nul
   requirePrompt(prompt);
   const controls = resolveClaudeControls(options, { ...runtime, mode });
   const permissionMode = resolvePermissionMode(mode, config, options, controls);
-  const outputFormat = controls.outputFormat ?? config.outputFormat;
+  const outputFormat = options["output-format"] ?? config.outputFormat;
   const routedPrompt = buildPrompt(mode, prompt, controls);
   return {
     mode,
@@ -115,16 +134,10 @@ export function buildRouterRequest({ mode, prompt, options = {}, gitBefore = nul
     userRequest: prompt,
     controls: {
       ...controls,
-      permissionMode,
-      pluginDirs: options["plugin-dir"] ?? [],
-      pluginUrls: options["plugin-url"] ?? [],
-      mcpConfigs: options["mcp-config"] ?? [],
-      settings: options.settings ?? null,
-      settingSources: options["setting-sources"] ?? null,
-      addDirs: options["add-dir"] ?? [],
-      strictMcpConfig: Boolean(options["strict-mcp-config"]),
-      dynamicClaudeArgs: [...dynamicClaudeArgs]
+      permissionMode
     },
+    nativeOptions: nativeOptionsFrom(options),
+    nativeControls,
     gitBefore,
     nonGoals: config.write ? ["Avoid unrelated refactors."] : ["Do not edit files."],
     constraints: ["Preserve user changes.", "Do not synthesize a Codex substitute if Claude fails."]

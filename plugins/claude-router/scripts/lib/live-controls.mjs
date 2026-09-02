@@ -1,4 +1,5 @@
 import { parseClaudeHelp } from "./claude-surface.mjs";
+import { NATIVE_SEED_CONTROLS, ROUTER_OWNED_OPTIONS } from "./routed-controls.mjs";
 
 const ROUTER_RESERVED_OPTIONS = new Set([
   "background",
@@ -109,11 +110,29 @@ export function discoverClaudeControls(helpText) {
 export function dynamicRoutedControls(helpText, options = {}) {
   const includeManaged = Boolean(options.includeManaged);
   return discoverClaudeControls(helpText).filter((control) => {
-    if (ROUTER_RESERVED_OPTIONS.has(control.option)) {
+    if (ROUTER_RESERVED_OPTIONS.has(control.option) || ROUTER_OWNED_OPTIONS.has(control.option)) {
       return false;
     }
     return includeManaged || !ROUTER_MANAGED_NATIVE_OPTIONS.has(control.option);
   });
+}
+
+export function mergeNativeCatalog(helpText, options = {}) {
+  const live = dynamicRoutedControls(helpText, options);
+  const byOption = new Map(NATIVE_SEED_CONTROLS.map((control) => [control.option, control]));
+  for (const control of live) {
+    const seed = byOption.get(control.option);
+    if (!seed) {
+      byOption.set(control.option, control);
+      continue;
+    }
+    byOption.set(control.option, {
+      ...control,
+      optionAliases: unique([...seed.optionAliases, ...control.optionAliases]),
+      inputKeys: unique([...seed.inputKeys, ...control.inputKeys])
+    });
+  }
+  return [...byOption.values()];
 }
 
 export function schemaForLiveControl(control) {
@@ -202,6 +221,6 @@ export function assertLiveControlSafety(options, controls) {
     return control.inputKeys.some((key) => options[key] === true || options[key] === "bypassPermissions");
   });
   if (requestedDangerous && !options["allow-dangerous"]) {
-    throw new Error("A live Claude flag requests dangerous permission bypass. Re-run with --allow-dangerous only if the user explicitly accepts that risk.");
+    throw new Error("Dangerous permission bypass was requested. Re-run with --allow-dangerous only if the user explicitly accepts that risk.");
   }
 }

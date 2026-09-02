@@ -27,6 +27,7 @@ import {
   appendLogLine,
   createJobLogFile,
   isCancelInProgress,
+  readLogPreview,
   runTrackedJob,
   trackChildProcessIdentity
 } from "../scripts/lib/tracked-jobs.mjs";
@@ -1132,6 +1133,41 @@ test("appendLogLine does not throw on missing parent and short-circuits after fa
   assert.doesNotThrow(() => appendLogLine(missing, "second line"));
   assert.doesNotThrow(() => appendLogLine(null, "ignored"));
   assert.doesNotThrow(() => appendLogLine("", "ignored"));
+});
+
+test("appendLogLine redacts API keys, bearer tokens, and sk- secrets before writing", () => {
+  const dir = makeTempDir();
+  const logFile = path.join(dir, "redact.log");
+  try {
+    appendLogLine(logFile, "env ANTHROPIC_API_KEY=top-secret-anthropic OPENAI_API_KEY=top-secret-openai");
+    appendLogLine(logFile, "header Authorization: Bearer top-secret-bearer-token");
+    appendLogLine(logFile, "keys sk-ant-api03-topsecretmaterial and sk-proj-topsecretmaterial");
+    const content = fs.readFileSync(logFile, "utf8");
+    assert.ok(!content.includes("top-secret-anthropic"));
+    assert.ok(!content.includes("top-secret-openai"));
+    assert.ok(!content.includes("top-secret-bearer-token"));
+    assert.ok(!content.includes("topsecretmaterial"));
+    assert.match(content, /ANTHROPIC_API_KEY=REDACTED/);
+    assert.match(content, /OPENAI_API_KEY=REDACTED/);
+    assert.match(content, /Authorization: Bearer REDACTED/);
+    assert.match(content, /sk-REDACTED/);
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test("readLogPreview returns the last lines and an empty list for missing files", () => {
+  const dir = makeTempDir();
+  const logFile = path.join(dir, "preview.log");
+  try {
+    fs.writeFileSync(logFile, `${["one", "two", "three", "four", "five", "six", "seven", "eight"].join("\n")}\n`, "utf8");
+    assert.deepEqual(readLogPreview(logFile), ["three", "four", "five", "six", "seven", "eight"]);
+    assert.deepEqual(readLogPreview(logFile, 2), ["seven", "eight"]);
+    assert.deepEqual(readLogPreview(path.join(dir, "absent.log")), []);
+    assert.deepEqual(readLogPreview(null), []);
+  } finally {
+    cleanupDir(dir);
+  }
 });
 
 test("createJobLogFile on unwritable sink returns without throwing and runTrackedJob still commits", async () => {

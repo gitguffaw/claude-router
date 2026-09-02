@@ -214,12 +214,16 @@ export function runProcess(command, args = [], options = {}) {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env ?? process.env,
-      input: options.input,
       stdio: ["pipe", "pipe", "pipe"],
       detached,
       shell: process.platform === "win32" ? (process.env.SHELL || true) : false,
       windowsHide: true
     });
+    if (options.input) {
+      child.stdin.end(options.input);
+    } else {
+      child.stdin.end();
+    }
     const processRecord = buildProcessRecord(child.pid ?? Number.NaN, { processGroup: Boolean(detached && process.platform !== "win32") });
     let trackingError = null;
     // setTimeout clamps delays > 2^31-1 to ~1ms; cap so huge timeouts are not instant kills.
@@ -447,11 +451,6 @@ export function runProcess(command, args = [], options = {}) {
         processGroup: processRecord.processGroup
       });
     });
-    if (options.input) {
-      child.stdin.end(options.input);
-    } else {
-      child.stdin.end();
-    }
   });
 }
 

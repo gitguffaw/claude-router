@@ -108,7 +108,8 @@ function parseNonNegativeNumber(value, defaultValue, label) {
   if (value === null || value === undefined || value === "") {
     return defaultValue;
   }
-  const parsed = Number(value);
+  // Number(" ") coerces to 0, which would silently zero the wait timeout.
+  const parsed = typeof value === "string" && value.trim() === "" ? NaN : Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new Error(`Invalid ${label} "${value}". Use a non-negative millisecond value.`);
   }

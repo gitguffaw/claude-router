@@ -24,7 +24,7 @@ Claude’s models and flags change independently of Claude Router. The installed
 - `models` reads `claude --help` every time. It reports model examples, current field choices such as effort and permission modes, every discovered top-level flag, and lean-profile availability.
 - `surface` returns the installed Claude version, top-level help, and the router coverage boundary.
 - `help <command path>` asks the installed CLI for command-specific help.
-- Managed MCP schemas are rebuilt from live help, so a newly added Claude flag can appear and route without a Claude Router release.
+- Managed MCP schemas are rebuilt from live help, so a newly added Claude flag can appear and route without a Claude Router release. MCP `tools/call` forwards one JSON request to the companion on stdin; it does not rebuild companion argv.
 - `--model` and `--effort` values are opaque pass-through strings. Claude Router does not keep an allowlist.
 
 Claude currently documents model examples in `--help`; it does not expose a guaranteed exhaustive model registry. The catalog labels this limit as `documented-examples` instead of claiming completeness.

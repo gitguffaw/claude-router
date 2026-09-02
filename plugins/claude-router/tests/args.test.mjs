@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseArgs } from "../scripts/lib/args.mjs";
+import { hasLeadingHelpFlag, parseArgs } from "../scripts/lib/args.mjs";
 
 test("parseArgs preserves inline values containing equals", () => {
   const parsed = parseArgs(["--append-system-prompt=A=B", "prompt"], {
@@ -55,4 +55,32 @@ test("splitRawArgumentString preserves quoted empty tools value", async () => {
   assert.deepEqual(tokens, ["--tools", "", "inspect"]);
   const single = splitRawArgumentString("--tools '' inspect");
   assert.deepEqual(single, ["--tools", "", "inspect"]);
+});
+
+test("parseArgs stopAtPositional keeps later dashed tokens in the prompt", () => {
+  const parsed = parseArgs(["--json", "--model", "sonnet", "document", "--json", "--background"], {
+    valueOptions: ["model"],
+    booleanOptions: ["json", "background"],
+    stopAtPositional: true
+  });
+
+  assert.deepEqual(parsed.options, {
+    json: true,
+    model: "sonnet"
+  });
+  assert.deepEqual(parsed.positionals, ["document", "--json", "--background"]);
+});
+
+test("parseArgs treats arrayOptions as repeatableOptions", () => {
+  const parsed = parseArgs(["--plugin-dir", "a", "--plugin-dir", "b"], {
+    valueOptions: ["plugin-dir"],
+    arrayOptions: ["plugin-dir"]
+  });
+  assert.deepEqual(parsed.options["plugin-dir"], ["a", "b"]);
+});
+
+test("hasLeadingHelpFlag ignores --help after the prompt or --", () => {
+  assert.equal(hasLeadingHelpFlag(["--json", "--help"]), true);
+  assert.equal(hasLeadingHelpFlag(["inspect", "--help"]), false);
+  assert.equal(hasLeadingHelpFlag(["--", "--help"]), false);
 });

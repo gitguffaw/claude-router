@@ -1,4 +1,6 @@
 import path from "node:path";
+import { nativeArgsFromParsedOptions } from "./live-controls.mjs";
+import { NATIVE_EMIT_SKIP } from "./routed-controls.mjs";
 import { binaryAvailable, runCommand, runProcess } from "./process.mjs";
 
 const DEFAULT_MANAGED_TIMEOUT_MS = 30 * 60 * 1000;
@@ -57,12 +59,6 @@ export function getClaudePluginStatus(cwd, env = process.env) {
   return { ok: !result.error && result.status === 0, detail: (result.stdout || result.stderr).trim() };
 }
 
-function appendRepeatable(args, flag, values) {
-  for (const value of Array.isArray(values) ? values : values ? [values] : []) {
-    args.push(flag, String(value));
-  }
-}
-
 // --tools "" is a deliberate Claude security control (disable built-in tools).
 // Preserve an explicit empty string as the two argv entries: --tools, "".
 function appendTools(args, values) {
@@ -87,14 +83,6 @@ function appendValue(args, flag, value) {
   }
 }
 
-function appendOptionalValue(args, flag, value) {
-  if (value === true) {
-    args.push(flag);
-  } else {
-    appendValue(args, flag, value);
-  }
-}
-
 function appendBoolean(args, flag, enabled) {
   if (enabled) {
     args.push(flag);
@@ -106,55 +94,12 @@ export function buildClaudePrintArgs(request) {
   const controls = request.controls ?? {};
   appendValue(args, "--model", controls.model);
   appendValue(args, "--effort", controls.effort);
-  appendBoolean(args, "--chrome", controls.chrome);
-  appendBoolean(args, "--no-chrome", controls.noChrome);
   appendBoolean(args, "--bare", controls.bare);
-  appendValue(args, "--settings", controls.settings);
-  appendValue(args, "--setting-sources", controls.settingSources);
-  appendBoolean(args, "--strict-mcp-config", controls.strictMcpConfig);
-  appendValue(args, "--agent", controls.agent);
-  appendValue(args, "--agents", controls.agents);
-  appendRepeatable(args, "--allowedTools", controls.allowedTools);
-  appendRepeatable(args, "--disallowedTools", controls.disallowedTools);
-  appendTools(args, controls.tools);
-  appendValue(args, "--append-system-prompt", controls.appendSystemPrompt);
-  appendBoolean(args, "--ax-screen-reader", controls.axScreenReader);
-  appendRepeatable(args, "--betas", controls.betas);
-  appendBoolean(args, "--brief", controls.brief);
-  appendBoolean(args, "--continue", controls.continue);
-  appendOptionalValue(args, "--debug", controls.debug);
-  appendValue(args, "--debug-file", controls.debugFile);
-  appendBoolean(args, "--disable-slash-commands", controls.disableSlashCommands);
-  appendBoolean(args, "--exclude-dynamic-system-prompt-sections", controls.excludeDynamicSystemPromptSections);
-  appendValue(args, "--fallback-model", controls.fallbackModel);
-  appendRepeatable(args, "--file", controls.files);
-  appendBoolean(args, "--fork-session", controls.forkSession);
-  appendValue(args, "--from-pr", controls.fromPr);
-  appendBoolean(args, "--ide", controls.ide);
-  appendBoolean(args, "--include-hook-events", controls.includeHookEvents);
-  appendBoolean(args, "--include-partial-messages", controls.includePartialMessages);
-  appendValue(args, "--input-format", controls.inputFormat);
-  appendValue(args, "--json-schema", controls.jsonSchema);
-  appendValue(args, "--max-budget-usd", controls.maxBudgetUsd);
-  appendValue(args, "--name", controls.name);
-  appendBoolean(args, "--no-session-persistence", controls.noSessionPersistence);
-  appendValue(args, "--prompt-suggestions", controls.promptSuggestions);
-  appendValue(args, "--remote-control", controls.remoteControl);
-  appendValue(args, "--remote-control-session-name-prefix", controls.remoteControlSessionNamePrefix);
-  appendBoolean(args, "--replay-user-messages", controls.replayUserMessages);
-  appendOptionalValue(args, "--resume", controls.resume);
   appendBoolean(args, "--safe-mode", controls.safeMode);
-  appendValue(args, "--session-id", controls.sessionId);
+  appendTools(args, controls.tools);
   appendValue(args, "--system-prompt", controls.systemPrompt);
-  appendOptionalValue(args, "--tmux", controls.tmux);
-  appendBoolean(args, "--verbose", controls.verbose);
-  appendOptionalValue(args, "--worktree", controls.worktree);
-  appendBoolean(args, "--allow-dangerously-skip-permissions", controls.allowDangerouslySkipPermissions);
-  appendRepeatable(args, "--plugin-dir", controls.pluginDirs);
-  appendRepeatable(args, "--plugin-url", controls.pluginUrls);
-  appendRepeatable(args, "--mcp-config", controls.mcpConfigs);
-  appendRepeatable(args, "--add-dir", controls.addDirs);
-  args.push(...(controls.dynamicClaudeArgs ?? []).map(String));
+  const nativeControls = (request.nativeControls ?? []).filter((control) => !NATIVE_EMIT_SKIP.has(control.option));
+  args.push(...nativeArgsFromParsedOptions(request.nativeOptions ?? {}, nativeControls));
   args.push(request.prompt);
   return args;
 }

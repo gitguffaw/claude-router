@@ -10,7 +10,7 @@ import { createContextPack } from "./lib/context-pack.mjs";
 import { handleCancel, handleResult, handleStatus } from "./lib/job-commands.mjs";
 import { renderModelCatalog, renderSetupReport, renderStartedJob } from "./lib/render.mjs";
 import { ROUTER_COMMANDS } from "./lib/router-commands.mjs";
-import { ROUTED_BOOLEAN_OPTIONS, ROUTED_OPTIONAL_VALUE_OPTIONS, ROUTED_REPEATABLE_OPTIONS, ROUTED_VALUE_OPTIONS } from "./lib/routed-controls.mjs";
+import { ROUTER_OWNED_CONTROLS } from "./lib/routed-controls.mjs";
 import { buildRouterRequest } from "./lib/router.mjs";
 import { binaryAvailable, runCommand, runProcess, spawnDetached, terminateProcessTree } from "./lib/process.mjs";
 import { generateJobId, readJobFile, resolveJobFile, transitionJob } from "./lib/state.mjs";
@@ -20,9 +20,8 @@ import { getModelCatalog } from "./lib/model-catalog.mjs";
 import {
   assertLiveControlSafety,
   discoverClaudeControls,
-  dynamicRoutedControls,
   liveControlParseConfig,
-  nativeArgsFromParsedOptions
+  mergeNativeCatalog
 } from "./lib/live-controls.mjs";
 import { parseClaudeHelp } from "./lib/claude-surface.mjs";
 
@@ -113,22 +112,46 @@ async function buildSetupReport(cwd) {
 }
 
 async function handleSetup(argv) {
-  const { options } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
+  return runSetup(parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] }));
+}
+
+async function runSetup({ options }) {
   const cwd = resolveCwd(options);
   const report = await buildSetupReport(cwd);
   output(options.json ? report : renderSetupReport(report), Boolean(options.json));
 }
 
-const COMMON_VALUES = ["cwd", "timeout", ...ROUTED_VALUE_OPTIONS];
-const COMMON_BOOLEANS = ["json", ...ROUTED_BOOLEAN_OPTIONS];
-
-function normalizeRepeatables(options) {
-  for (const key of ROUTED_REPEATABLE_OPTIONS) {
+function normalizeRepeatables(options, repeatableOptions = []) {
+  for (const key of repeatableOptions) {
     if (options[key] && !Array.isArray(options[key])) {
       options[key] = [options[key]];
     }
   }
   return options;
+}
+
+function discoverRoutedSurface(cwd = process.cwd()) {
+  const liveHelpResult = runCommand("claude", ["--help"], { cwd });
+  const liveHelp = liveHelpResult.status === 0 && !liveHelpResult.error
+    ? (liveHelpResult.stdout || liveHelpResult.stderr)
+    : "";
+  return {
+    liveHelp,
+    nativeControls: mergeNativeCatalog(liveHelp)
+  };
+}
+
+function parseRoutedInput(argv, nativeControls) {
+  const liveConfig = liveControlParseConfig([...ROUTER_OWNED_CONTROLS, ...nativeControls]);
+  const parsed = parseCommandInput(argv, {
+    valueOptions: liveConfig.valueOptions,
+    booleanOptions: liveConfig.booleanOptions,
+    repeatableOptions: liveConfig.repeatableOptions,
+    optionalValueOptions: liveConfig.optionalValueOptions,
+    aliasMap: liveConfig.aliasMap
+  });
+  normalizeRepeatables(parsed.options, liveConfig.repeatableOptions);
+  return parsed;
 }
 
 function commandPayload(result) {
@@ -212,13 +235,19 @@ function renderRouterHelp(payload) {
 }
 
 function handleRouterHelp(argv) {
-  const { options } = parseCommandInput(argv, { booleanOptions: ["json"] });
+  return runRouterHelp(parseCommandInput(argv, { booleanOptions: ["json"] }));
+}
+
+function runRouterHelp({ options } = { options: {} }) {
   const payload = routerHelpPayload();
   output(options.json ? payload : renderRouterHelp(payload), Boolean(options.json));
 }
 
 async function handleVersion(argv) {
-  const { options } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
+  return runVersion(parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] }));
+}
+
+async function runVersion({ options }) {
   const cwd = resolveCwd(options);
   const version = runCommand("claude", ["--version"], { cwd });
   const payload = {
@@ -254,10 +283,6 @@ function renderSurfacePayload(payload) {
     lines.push("", "Claude CLI help:", "```", commandText(payload.help), "```");
   }
   return `${lines.join("\n").trimEnd()}\n`;
-}
-
-function hasFlag(args, ...flags) {
-  return args.some((arg) => flags.includes(arg) || flags.some((flag) => arg.startsWith(`${flag}=`)));
 }
 
 function rawCommandClassification(args, parserOptions = {}) {
@@ -320,7 +345,10 @@ function assertRawClaudeArgs(args, options = {}, parserOptions = {}) {
 }
 
 async function handleSurface(argv) {
-  const { options } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
+  return runSurface(parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] }));
+}
+
+async function runSurface({ options }) {
   const cwd = resolveCwd(options);
   const version = runCommand("claude", ["--version"], { cwd });
   const help = runCommand("claude", ["--help"], { cwd });
@@ -341,7 +369,10 @@ async function handleSurface(argv) {
 }
 
 async function handleClaudeHelp(argv) {
-  const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
+  return runClaudeHelp(parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] }));
+}
+
+async function runClaudeHelp({ options, positionals }) {
   const cwd = resolveCwd(options);
   const args = [...positionals, "--help"];
   const result = runCommand("claude", args, { cwd });
@@ -350,24 +381,30 @@ async function handleClaudeHelp(argv) {
 }
 
 async function handleHelp(argv) {
-  const { options, positionals } = parseCommandInput(argv, {
+  return runHelp(parseCommandInput(argv, {
     valueOptions: ["cwd"],
     booleanOptions: ["json", "help"],
     aliasMap: { h: "help" }
-  });
+  }));
+}
+
+async function runHelp({ options, positionals }) {
   if (!positionals.length || options.help) {
     const payload = routerHelpPayload();
     output(options.json ? payload : renderRouterHelp(payload), Boolean(options.json));
     return;
   }
-  await handleClaudeHelp(argv);
+  await runClaudeHelp({ options, positionals });
 }
 
 async function handleRawClaude(argv) {
-  const { options, positionals } = parseCommandInput(argv, {
+  return runRawClaude(parseCommandInput(argv, {
     valueOptions: ["cwd", "timeout-ms"],
     booleanOptions: ["json", "allow-mutating", "allow-dangerous"]
-  });
+  }));
+}
+
+async function runRawClaude({ options, positionals }) {
   const cwd = resolveCwd(options);
   const args = positionals;
   const help = runCommand("claude", ["--help"], { cwd });
@@ -417,32 +454,14 @@ async function handleRouted(mode, argv) {
   // Claude's top-level surface is binary-scoped, so discover it before parsing
   // routed values. A preliminary --cwd parse could mistake a quoted flag-like
   // value (for example a system prompt equal to "--cwd") for router control.
-  const liveHelpResult = runCommand("claude", ["--help"], { cwd: process.cwd() });
-  const liveHelp = liveHelpResult.status === 0 && !liveHelpResult.error
-    ? (liveHelpResult.stdout || liveHelpResult.stderr)
-    : "";
-  const allLiveControls = dynamicRoutedControls(liveHelp);
-  const knownOptions = new Set([
-    ...ROUTED_VALUE_OPTIONS,
-    ...ROUTED_OPTIONAL_VALUE_OPTIONS,
-    ...ROUTED_BOOLEAN_OPTIONS
-  ]);
-  const extraLiveControls = allLiveControls.filter((control) => !knownOptions.has(control.option));
-  const liveConfig = liveControlParseConfig(extraLiveControls);
-  const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: [...COMMON_VALUES, ...liveConfig.valueOptions],
-    booleanOptions: [...COMMON_BOOLEANS, ...liveConfig.booleanOptions],
-    repeatableOptions: [...ROUTED_REPEATABLE_OPTIONS, ...liveConfig.repeatableOptions],
-    optionalValueOptions: [...ROUTED_OPTIONAL_VALUE_OPTIONS, ...liveConfig.optionalValueOptions],
-    aliasMap: liveConfig.aliasMap
-  });
-  normalizeRepeatables(options);
-  for (const key of liveConfig.repeatableOptions) {
-    if (options[key] && !Array.isArray(options[key])) {
-      options[key] = [options[key]];
-    }
-  }
-  assertLiveControlSafety(options, extraLiveControls);
+  const { nativeControls, liveHelp } = discoverRoutedSurface();
+  const parsed = parseRoutedInput(argv, nativeControls);
+  return runRouted(mode, parsed, { nativeControls, liveHelp });
+}
+
+async function runRouted(mode, { options, positionals }, { nativeControls, liveHelp } = {}) {
+  const catalog = nativeControls ?? mergeNativeCatalog(liveHelp ?? "");
+  assertLiveControlSafety(options, catalog);
   const cwd = resolveCwd(options);
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const prompt = positionals.join(" ");
@@ -457,7 +476,7 @@ async function handleRouted(mode, argv) {
     options,
     gitBefore,
     runtime: { auth, env: process.env, availableFlags },
-    dynamicClaudeArgs: nativeArgsFromParsedOptions(options, extraLiveControls)
+    nativeControls: catalog
   });
   const contextPack = createContextPack(workspaceRoot, request);
   const jobId = generateJobId(mode);
@@ -553,13 +572,19 @@ async function handleRouted(mode, argv) {
 }
 
 async function handleRunJob(argv) {
-  const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: [] });
+  return runRunJob(parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: [] }));
+}
+
+async function runRunJob({ options, positionals }) {
   const cwd = resolveCwd(options);
   await runStoredJob(cwd, positionals[0], { backgroundWorker: process.env.CLAUDE_ROUTER_BACKGROUND === "1" });
 }
 
 async function handleUltrareview(argv) {
-  const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd", "timeout"], booleanOptions: ["json"] });
+  return runUltrareview(parseCommandInput(argv, { valueOptions: ["cwd", "timeout"], booleanOptions: ["json"] }));
+}
+
+async function runUltrareview({ options, positionals }) {
   const cwd = resolveCwd(options);
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const result = await runClaudeUltrareview(workspaceRoot, { timeout: options.timeout, target: positionals[0] });
@@ -567,10 +592,13 @@ async function handleUltrareview(argv) {
 }
 
 async function handleModels(argv) {
-  const { options } = parseCommandInput(argv, {
+  return runModels(parseCommandInput(argv, {
     valueOptions: ["capability", "cwd"],
     booleanOptions: ["json", "static"]
-  });
+  }));
+}
+
+async function runModels({ options }) {
   if (options.static) {
     throw new Error("--static was removed: the models catalog now always reads the installed Claude CLI so it cannot silently go stale.");
   }
@@ -600,7 +628,127 @@ async function handleModels(argv) {
   output(options.json ? catalog : renderModelCatalog(catalog), Boolean(options.json));
 }
 
+function jsonRequestToParsed(request) {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new Error("JSON request must be an object.");
+  }
+  const options = { json: true };
+  for (const [key, value] of Object.entries(request)) {
+    if (["command", "prompt", "args", "job_id", "target"].includes(key)) {
+      continue;
+    }
+    options[key.replaceAll("_", "-")] = value;
+  }
+  let positionals = [];
+  if (Object.prototype.hasOwnProperty.call(request, "prompt") && request.prompt != null) {
+    positionals = [String(request.prompt)];
+  } else if (Array.isArray(request.args)) {
+    positionals = request.args.map(String);
+  } else if (request.job_id) {
+    positionals = [String(request.job_id)];
+  } else if (request.target) {
+    positionals = [String(request.target)];
+  }
+  return { options, positionals };
+}
+
+async function runJobQuery(kind, { options, positionals }) {
+  const workspaceRoot = resolveWorkspaceRoot(resolveCwd(options));
+  if (kind === "status") {
+    await handleStatus(workspaceRoot, {
+      reference: positionals[0] ?? "",
+      json: Boolean(options.json),
+      wait: Boolean(options.wait),
+      all: Boolean(options.all),
+      timeoutMs: options["timeout-ms"],
+      pollIntervalMs: options["poll-interval-ms"]
+    });
+    return;
+  }
+  if (kind === "result") {
+    handleResult(workspaceRoot, { reference: positionals[0] ?? "", json: Boolean(options.json) });
+    return;
+  }
+  await handleCancel(workspaceRoot, { reference: positionals[0] ?? "", json: Boolean(options.json) });
+}
+
+async function dispatchParsed(command, parsed) {
+  if (!command || command === "--help" || command === "-h" || command === "help") {
+    if (!command || command === "--help" || command === "-h" || !parsed.positionals.length || parsed.options.help) {
+      runRouterHelp(parsed);
+      return;
+    }
+    await runHelp(parsed);
+    return;
+  }
+  if (command === "--version" || command === "-v" || command === "version") {
+    await runVersion(parsed);
+    return;
+  }
+  if (command === "setup") {
+    await runSetup(parsed);
+  } else if (command === "surface") {
+    await runSurface(parsed);
+  } else if (command === "raw" || command === "cli") {
+    await runRawClaude(parsed);
+  } else if (["analyze", "plan", "exec", "review", "adversarial-review"].includes(command)) {
+    const cwd = parsed.options.cwd ? resolveCwd(parsed.options) : process.cwd();
+    const surface = discoverRoutedSurface(cwd);
+    normalizeRepeatables(parsed.options, liveControlParseConfig([...ROUTER_OWNED_CONTROLS, ...surface.nativeControls]).repeatableOptions);
+    await runRouted(command, parsed, surface);
+  } else if (command === "run-job") {
+    await runRunJob(parsed);
+  } else if (command === "ultrareview") {
+    await runUltrareview(parsed);
+  } else if (command === "status" || command === "result" || command === "cancel") {
+    await runJobQuery(command, parsed);
+  } else if (command === "models") {
+    await runModels(parsed);
+  } else {
+    throw new Error(`Unknown command "${command}".`);
+  }
+}
+
+function readStdinUtf8() {
+  const chunks = [];
+  const buf = Buffer.alloc(64 * 1024);
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    try {
+      const bytesRead = fs.readSync(0, buf, 0, buf.length, null);
+      if (bytesRead === 0) {
+        break;
+      }
+      chunks.push(Buffer.from(buf.subarray(0, bytesRead)));
+    } catch (error) {
+      if (error.code !== "EAGAIN" && error.code !== "EWOULDBLOCK") {
+        throw error;
+      }
+      if (Date.now() >= deadline) {
+        if (chunks.length) {
+          break;
+        }
+        throw new Error("JSON request stdin was empty.");
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function handleJsonRequest() {
+  const request = JSON.parse(readStdinUtf8());
+  if (!request?.command) {
+    throw new Error("JSON request missing command.");
+  }
+  await dispatchParsed(request.command, jsonRequestToParsed(request));
+}
+
 async function main() {
+  if (process.argv[2] === "--json-request") {
+    await handleJsonRequest();
+    return;
+  }
   const [command, ...argv] = process.argv.slice(2);
   if (!command || command === "--help" || command === "-h") {
     handleRouterHelp(argv);
@@ -625,21 +773,14 @@ async function main() {
   } else if (command === "ultrareview") {
     await handleUltrareview(argv);
   } else if (command === "status") {
-    const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd", "timeout-ms", "poll-interval-ms"], booleanOptions: ["json", "wait", "all"] });
-    await handleStatus(resolveWorkspaceRoot(resolveCwd(options)), {
-      reference: positionals[0] ?? "",
-      json: Boolean(options.json),
-      wait: Boolean(options.wait),
-      all: Boolean(options.all),
-      timeoutMs: options["timeout-ms"],
-      pollIntervalMs: options["poll-interval-ms"]
-    });
+    await runJobQuery("status", parseCommandInput(argv, {
+      valueOptions: ["cwd", "timeout-ms", "poll-interval-ms"],
+      booleanOptions: ["json", "wait", "all"]
+    }));
   } else if (command === "result") {
-    const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
-    handleResult(resolveWorkspaceRoot(resolveCwd(options)), { reference: positionals[0] ?? "", json: Boolean(options.json) });
+    await runJobQuery("result", parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] }));
   } else if (command === "cancel") {
-    const { options, positionals } = parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] });
-    await handleCancel(resolveWorkspaceRoot(resolveCwd(options)), { reference: positionals[0] ?? "", json: Boolean(options.json) });
+    await runJobQuery("cancel", parseCommandInput(argv, { valueOptions: ["cwd"], booleanOptions: ["json"] }));
   } else if (command === "models") {
     await handleModels(argv);
   } else {

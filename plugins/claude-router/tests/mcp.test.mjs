@@ -382,7 +382,7 @@ test("mcp prompt argument boundary treats dash-leading prompts as data", async (
       assert.equal(payload.request.userRequest, prompt);
       assert.equal(payload.request.permissionMode, "plan");
       // Not interpreted as router controls.
-      assert.equal(payload.request.controls.debug, null);
+      assert.equal(payload.request.nativeOptions.debug, undefined);
       assert.equal(payload.request.controls.tools.length === 0 || payload.request.controls.tools === "", true);
       const claudeArgs = payload.result.args;
       assert.equal(claudeArgs.at(-1), payload.request.prompt);

@@ -1,9 +1,40 @@
+// Shared argv parser. Keep this file identical in claude-router and
+// codex-router (do not merge the git repos). Claude needs empty quoted
+// values and optional-value flags; Codex needs stopAtPositional.
+// `arrayOptions` is an alias of `repeatableOptions`.
+
+function isOptionLikeToken(token) {
+  return Boolean(token) && token !== "-" && String(token).startsWith("-");
+}
+
+export function hasLeadingHelpFlag(argv) {
+  for (const token of argv) {
+    if (token === "--") {
+      return false;
+    }
+    if (!isOptionLikeToken(token)) {
+      return false;
+    }
+    if (token === "--help" || token === "-h") {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function parseArgs(argv, config = {}) {
-  const valueOptions = new Set(config.valueOptions ?? []);
+  const valueOptions = new Set([
+    ...(config.valueOptions ?? []),
+    ...(config.arrayOptions ?? [])
+  ]);
   const optionalValueOptions = new Set(config.optionalValueOptions ?? []);
   const booleanOptions = new Set(config.booleanOptions ?? []);
-  const repeatableOptions = new Set(config.repeatableOptions ?? []);
+  const repeatableOptions = new Set([
+    ...(config.repeatableOptions ?? []),
+    ...(config.arrayOptions ?? [])
+  ]);
   const aliasMap = config.aliasMap ?? {};
+  const stopAtPositional = Boolean(config.stopAtPositional);
   const options = {};
   const positionals = [];
   let passthrough = false;
@@ -32,6 +63,12 @@ export function parseArgs(argv, config = {}) {
     return false;
   }
 
+  function endOptions() {
+    if (stopAtPositional) {
+      passthrough = true;
+    }
+  }
+
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (passthrough) {
@@ -44,6 +81,7 @@ export function parseArgs(argv, config = {}) {
     }
     if (!token.startsWith("-") || token === "-") {
       positionals.push(token);
+      endOptions();
       continue;
     }
     if (token.startsWith("--")) {
@@ -80,6 +118,7 @@ export function parseArgs(argv, config = {}) {
         continue;
       }
       positionals.push(token);
+      endOptions();
       continue;
     }
 
@@ -109,6 +148,7 @@ export function parseArgs(argv, config = {}) {
       continue;
     }
     positionals.push(token);
+    endOptions();
   }
 
   return { options, positionals };

@@ -10,10 +10,10 @@ import {
   MCP_ROUTED_BOOLEAN_CONTROLS,
   MCP_ROUTED_OPTIONAL_VALUE_CONTROLS,
   MCP_ROUTED_VALUE_CONTROLS,
-  routedFlagEntries,
+  ROUTER_OWNED_SCHEMA_OPTIONS,
   routedInputSchemaProperties
 } from "./lib/routed-controls.mjs";
-import { appendLiveControlArgs, dynamicRoutedControls, schemaForLiveControl } from "./lib/live-controls.mjs";
+import { dynamicRoutedControls, schemaForLiveControl } from "./lib/live-controls.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const COMPANION = path.join(ROOT, "scripts", "claude-companion.mjs");
@@ -21,26 +21,6 @@ const PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin
 
 const tools = MCP_TOOLS;
 const ROUTED_COMMANDS = ROUTED_COMMAND_NAMES;
-const VALUE_FLAGS = routedFlagEntries(MCP_ROUTED_VALUE_CONTROLS);
-const OPTIONAL_VALUE_FLAGS = routedFlagEntries(MCP_ROUTED_OPTIONAL_VALUE_CONTROLS);
-const BOOLEAN_FLAGS = routedFlagEntries(MCP_ROUTED_BOOLEAN_CONTROLS);
-const STATIC_ROUTED_OPTIONS = new Set([
-  ...MCP_ROUTED_VALUE_CONTROLS,
-  ...MCP_ROUTED_OPTIONAL_VALUE_CONTROLS,
-  ...MCP_ROUTED_BOOLEAN_CONTROLS
-].flatMap((control) => [control.option, ...control.optionAliases]));
-const ROUTER_OWNED_SCHEMA_OPTIONS = new Set([
-  "allow-dangerous",
-  "background",
-  "best",
-  "haiku",
-  "lean",
-  "long-context",
-  "opus",
-  "sonnet",
-  "timeout-ms",
-  "ultrathink"
-]);
 const STATIC_MCP_CONTROLS = [
   ...MCP_ROUTED_VALUE_CONTROLS,
   ...MCP_ROUTED_OPTIONAL_VALUE_CONTROLS,
@@ -362,135 +342,10 @@ export function validateAgainstSchema(schema, value, path = "arguments") {
   }
 }
 
-function firstDefined(input, keys) {
-  for (const key of keys) {
-    if (input[key] !== undefined && input[key] !== null && input[key] !== false) {
-      return input[key];
-    }
-  }
-  return undefined;
-}
-
-function appendValue(args, input, flag, keys) {
-  // Control-specific: --tools "" disables all built-in tools and must be preserved.
-  if (flag === "--tools") {
-    for (const key of keys) {
-      if (!Object.prototype.hasOwnProperty.call(input, key)) {
-        continue;
-      }
-      const raw = input[key];
-      if (raw === "") {
-        args.push(flag, "");
-        return;
-      }
-      if (Array.isArray(raw)) {
-        for (const item of raw) {
-          args.push(flag, String(item));
-        }
-        return;
-      }
-    }
-  }
-  const value = firstDefined(input, keys);
-  if (value === undefined || value === "") {
-    return;
-  }
-  for (const item of Array.isArray(value) ? value : [value]) {
-    args.push(flag, String(item));
-  }
-}
-
-function appendBoolean(args, input, flag, keys) {
-  if (firstDefined(input, keys) === true) {
-    args.push(flag);
-  }
-}
-
-function appendOptionalValue(args, input, flag, keys) {
-  const value = firstDefined(input, keys);
-  if (value === undefined || value === "") {
-    return;
-  }
-  args.push(flag);
-  if (value !== true) {
-    args.push(String(value));
-  }
-}
-
-function appendRoutedFlags(args, input, liveControls = []) {
-  for (const [flag, ...keys] of VALUE_FLAGS) {
-    appendValue(args, input, flag, keys);
-  }
-  for (const [flag, ...keys] of OPTIONAL_VALUE_FLAGS) {
-    appendOptionalValue(args, input, flag, keys);
-  }
-  for (const [flag, ...keys] of BOOLEAN_FLAGS) {
-    appendBoolean(args, input, flag, keys);
-  }
-  appendLiveControlArgs(
-    args,
-    input,
-    liveControls.filter((control) => !STATIC_ROUTED_OPTIONS.has(control.option))
-  );
-}
-
-function buildCompanionArgs(tool, input = {}, liveControls = []) {
-  const args = [COMPANION, tool.command, "--json"];
-  if (input.cwd) {
-    args.push("--cwd", input.cwd);
-  }
-  if (ROUTED_COMMANDS.has(tool.command)) {
-    appendRoutedFlags(args, input, liveControls);
-    // Argument boundary: every MCP prompt is data, including strings that begin with dashes.
-    if (input.prompt !== undefined && input.prompt !== null) {
-      args.push("--", String(input.prompt));
-    }
-  } else if (tool.command === "raw") {
-    if (input.timeout_ms !== undefined && input.timeout_ms !== null) {
-      args.push("--timeout-ms", String(input.timeout_ms));
-    }
-    if (input.allow_mutating || input["allow-mutating"]) {
-      args.push("--allow-mutating");
-    }
-    if (input.allow_dangerous || input["allow-dangerous"]) {
-      args.push("--allow-dangerous");
-    }
-    args.push("--", ...(Array.isArray(input.args) ? input.args.map(String) : []));
-  } else if (tool.command === "help") {
-    args.push("--", ...(Array.isArray(input.args) ? input.args.map(String) : []));
-  } else if (tool.command === "status") {
-    if (input.wait) {
-      args.push("--wait");
-    }
-    if (input.all) {
-      args.push("--all");
-    }
-    if (input.timeout_ms !== undefined && input.timeout_ms !== null) {
-      args.push("--timeout-ms", String(input.timeout_ms));
-    }
-    if (input.poll_interval_ms !== undefined && input.poll_interval_ms !== null) {
-      args.push("--poll-interval-ms", String(input.poll_interval_ms));
-    }
-    if (input.job_id) {
-      args.push(input.job_id);
-    }
-  } else if (tool.command === "ultrareview") {
-    if (input.timeout) {
-      args.push("--timeout", String(input.timeout));
-    }
-    if (input.target) {
-      args.push(String(input.target));
-    }
-  } else if (input.job_id) {
-    args.push(input.job_id);
-  }
-  return args;
-}
-
 /**
- * Resolve MCP cwd once against the server process cwd so spawn and --cwd share
- * one absolute path. Relative values must not be re-resolved inside the companion
- * after spawn has already chdir'd into them (…/myrepo/myrepo).
+ * Resolve MCP cwd once against the server process cwd so spawn and the JSON
+ * request share one absolute path. Relative values must not be re-resolved
+ * inside the companion after spawn has already chdir'd into them (…/myrepo/myrepo).
  */
 function resolveMcpCwd(cwd) {
   if (!cwd) {
@@ -507,17 +362,21 @@ async function callTool(name, input = {}) {
   const discoveryCwd = resolveMcpCwd(input.cwd) || ROOT;
   const liveControls = readLiveRoutedControls(discoveryCwd);
   validateAgainstSchema(schemaFor(tool, liveControls), input ?? {});
-  // Canonicalize once at the MCP boundary before buildCompanionArgs and spawn.
   const resolvedCwd = resolveMcpCwd(input.cwd);
   const toolInput = resolvedCwd ? { ...input, cwd: resolvedCwd } : input;
-  const args = buildCompanionArgs(tool, toolInput, liveControls);
+  const payload = {
+    command: tool.command,
+    json: true,
+    ...toolInput
+  };
   const outerTimeoutMs = resolveOuterTimeoutMs(toolInput.timeout_ms);
   let inFlightEntry = null;
   let result;
   try {
-    result = await runProcess(process.execPath, args, {
+    result = await runProcess(process.execPath, [COMPANION, "--json-request"], {
       cwd: resolvedCwd || ROOT,
       env: process.env,
+      input: `${JSON.stringify(payload)}\n`,
       timeoutMs: outerTimeoutMs,
       maxOutputBytes: COMPANION_MAX_OUTPUT_BYTES,
       // onSpawn must not throw — tracking is best-effort for shutdown sweep only.

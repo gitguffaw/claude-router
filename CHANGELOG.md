@@ -4,6 +4,11 @@ All notable changes to Claude Router are documented here.
 
 ## Unreleased
 
+### Changed
+
+- Routed native Claude flags now parse and emit from one catalog (router-owned controls plus live `claude --help`, with a parse seed when help is down). The camelCase control bag and per-flag `append*` list are gone.
+- MCP tools/call forwards one JSON request on companion stdin (`--json-request`) instead of rebuilding companion argv. Dash-leading prompts, empty `--tools`, and relative `cwd` stay data at that JSON boundary.
+
 ## [2.4.0] — 2026-08-14
 
 ### Added

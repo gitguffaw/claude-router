@@ -608,6 +608,56 @@ test("managed routed jobs fail when the Claude process times out", () => {
   assert.match(payload.warnings.join("\n"), /timed out/);
 });
 
+test("timeout with a live Claude session records session id and killed-in-progress", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const env = buildEnv(bin, data);
+  const result = run("node", [SCRIPT, "analyze", "--json", "--timeout-ms", "250", "SLEEP"], { cwd: repo, env, timeout: 5000 });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.phase, "timed-out");
+  assert.equal(payload.result.timedOut, true);
+  assert.equal(payload.result.failureKind, "killed-in-progress");
+  assert.equal(payload.result.killedInProgress, true);
+  assert.equal(payload.result.rawOutput, "");
+  assert.equal(payload.claudeSessionId, "468cefa0-5f55-4e45-a8fa-093f989e3096");
+  assert.match(payload.claudeSessionPath, /468cefa0-5f55-4e45-a8fa-093f989e3096\.jsonl$/);
+  assert.match(payload.rendered, /killed in progress/i);
+  assert.doesNotMatch(payload.rendered, /Claude returned no output/);
+  assert.match(payload.rendered, /Job log:/);
+  assert.match(payload.rendered, /Claude session:/);
+  assert.match(payload.rendered, /Resume: claude --resume 468cefa0-5f55-4e45-a8fa-093f989e3096/);
+  assert.match(payload.warnings.join("\n"), /session was still in progress/);
+
+  const shown = run("node", [SCRIPT, "result", payload.id], { cwd: repo, env });
+  assert.equal(shown.status, 0, shown.stderr);
+  assert.match(shown.stdout, /Failure: killed-in-progress/);
+  assert.match(shown.stdout, /Resume in Claude: claude --resume 468cefa0-5f55-4e45-a8fa-093f989e3096/);
+});
+
+test("timeout without a Claude session is a hard empty failure", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const env = { ...buildEnv(bin, data), FAKE_CLAUDE_NO_SESSION: "1" };
+  const result = run("node", [SCRIPT, "analyze", "--json", "--timeout-ms", "250", "SLEEP"], { cwd: repo, env, timeout: 5000 });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.result.timedOut, true);
+  assert.equal(payload.result.failureKind, "timed-out-empty");
+  assert.equal(payload.result.killedInProgress, false);
+  assert.equal(payload.claudeSessionId, null);
+  assert.match(payload.rendered, /no captured Claude output or session/);
+  assert.doesNotMatch(payload.rendered, /Claude returned no output/);
+});
+
 
 test("status and result return stored jobs", () => {
   const repo = makeTempDir();

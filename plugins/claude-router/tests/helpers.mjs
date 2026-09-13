@@ -60,6 +60,29 @@ if (args.includes("-p")) {
     if (process.env.FAKE_CLAUDE_PID_FILE) {
       fs.writeFileSync(process.env.FAKE_CLAUDE_PID_FILE, String(process.pid));
     }
+    const path = require("path");
+    const configDir = process.env.CLAUDE_CONFIG_DIR;
+    if (configDir && process.env.FAKE_CLAUDE_NO_SESSION !== "1") {
+      const sessionId = process.env.FAKE_CLAUDE_SESSION_ID || "468cefa0-5f55-4e45-a8fa-093f989e3096";
+      const slug = process.cwd().replace(/[^a-zA-Z0-9]/g, "-");
+      const projectDir = path.join(configDir, "projects", slug);
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectDir, sessionId + ".jsonl"),
+        JSON.stringify({ type: "system", sessionId, cwd: process.cwd() }) + "\\n"
+      );
+      const subagents = (process.env.FAKE_CLAUDE_SUBAGENTS || "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3").split(",");
+      for (const raw of subagents) {
+        const id = String(raw).trim();
+        if (!id) {
+          continue;
+        }
+        fs.writeFileSync(
+          path.join(projectDir, id + ".jsonl"),
+          JSON.stringify({ type: "system", sessionId: id, parentSessionId: sessionId, isSidechain: true }) + "\\n"
+        );
+      }
+    }
     setTimeout(() => {
       console.log(JSON.stringify({ result: "Slept", session_id: "00000000-0000-4000-8000-000000000000" }));
     }, 5000);
@@ -81,6 +104,7 @@ export function buildEnv(binDir, dataDir = makeTempDir()) {
   return {
     ...process.env,
     PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
-    CLAUDE_ROUTER_DATA: dataDir
+    CLAUDE_ROUTER_DATA: dataDir,
+    CLAUDE_CONFIG_DIR: path.join(dataDir, "claude-config")
   };
 }

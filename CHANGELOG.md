@@ -4,6 +4,10 @@ All notable changes to Claude Router are documented here.
 
 ## Unreleased
 
+### Fixed
+
+- Timeout kills of managed print jobs now attach a discovered Claude session id when stdout JSON is missing, distinguish `killed-in-progress` from a hard-empty timeout, and include job log, session path, and a `claude --resume` pointer instead of reporting “no output.” Docs clarify that the 30-minute default is the managed bound and that `180000` ms is only for short smoke tests.
+
 ## [2.5.0] — 2026-09-02
 
 ### Changed

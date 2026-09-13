@@ -135,6 +135,8 @@ test("mcp server lists tools with closed schemas and omits always-rejected contr
     assert.equal(analyze.inputSchema.properties.timeout, undefined);
     assert.equal(analyze.inputSchema.properties.timeout_ms.type, "number");
     assert.equal(analyze.inputSchema.properties.timeout_ms.minimum, 0);
+    assert.match(analyze.inputSchema.properties.timeout_ms.description, /1800000 \(30 minutes\)/);
+    assert.match(analyze.inputSchema.properties.timeout_ms.description, /180000 \(3 minutes\) is only for short smoke tests/);
     assert.deepEqual(analyze.inputSchema.properties.permission_mode.enum, ["plan"]);
     assert.deepEqual(analyze.inputSchema.required, ["prompt"]);
 

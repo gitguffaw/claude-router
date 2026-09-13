@@ -17,6 +17,8 @@ Managed modes wrap Claude print mode with a task contract, permission boundary, 
 
 Use `--background` for a managed job that should return immediately. Follow it with `status`, `result`, or `cancel`.
 
+Managed print jobs default to a 30-minute (`1800000` ms) wall-clock timeout. `--timeout-ms` / `timeout_ms` overrides it; `0` disables the managed timeout. `180000` ms (3 minutes) is only for short smoke tests. Raise the timeout for medium effort or Explore/subagent fan-out so Claude can finish synthesis. If the timeout still fires while a session is live, the job is `failed` / `timedOut` with `failureKind: "killed-in-progress"` and a resume pointer, not an empty-model failure.
+
 ## 2. Live CLI Discovery
 
 Claude’s models and flags change independently of Claude Router. The installed `claude` binary is therefore the runtime authority.
@@ -78,7 +80,7 @@ Do not combine `--safe-mode` and `--bare`. To disable every built-in tool, pass 
 ## 4. Job Lifecycle
 
 - `status` lists jobs or inspects one job.
-- `result` retrieves the stored final result and Claude session id when present.
+- `result` retrieves the stored final result, Claude session id, session path, and job log when present.
 - `cancel` terminates an active tracked process tree.
 - Managed modes store the request, selected controls, policy hash, git snapshots, logs, and result under the workspace’s router state.
 

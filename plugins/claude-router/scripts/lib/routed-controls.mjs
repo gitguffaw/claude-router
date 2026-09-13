@@ -49,7 +49,15 @@ function control({
 // native Claude flag unless resolveClaudeControls maps them (lean, shorthands).
 export const ROUTER_OWNED_VALUE_CONTROLS = [
   control({ flag: "--cwd", mcp: false, owner: "router" }),
-  control({ flag: "--timeout-ms", schema: NONNEGATIVE_NUMBER_SCHEMA, owner: "router" }),
+  control({
+    flag: "--timeout-ms",
+    schema: {
+      ...NONNEGATIVE_NUMBER_SCHEMA,
+      description:
+        "Managed print-job timeout in milliseconds. Default 1800000 (30 minutes). 0 disables the managed timeout. 180000 (3 minutes) is only for short smoke tests; raise this for medium effort or Explore/subagent fan-out."
+    },
+    owner: "router"
+  }),
   control({ flag: "--base", mcp: false, owner: "router" }),
   control({ flag: "--scope", mcp: false, owner: "router" }),
   control({ flag: "--timeout", mcp: false, owner: "router" })

@@ -85,8 +85,20 @@ export function renderStoredJobResult(job) {
     return "Claude Router job not found.\n";
   }
   const lines = [`# Claude Job Result ${job.id}`, "", `Status: ${job.status}`];
+  if (job.phase) {
+    lines.push(`Phase: ${job.phase}`);
+  }
+  if (job.result?.failureKind) {
+    lines.push(`Failure: ${job.result.failureKind}`);
+  }
   if (job.contextPack?.id) {
     lines.push(`Context pack: ${job.contextPack.id}`);
+  }
+  if (job.logFile) {
+    lines.push(`Job log: ${job.logFile}`);
+  }
+  if (job.claudeSessionPath || job.result?.claudeSessionPath) {
+    lines.push(`Claude session: ${job.claudeSessionPath || job.result.claudeSessionPath}`);
   }
   if (job.claudeSessionId) {
     lines.push(`Resume in Claude: claude --resume ${job.claudeSessionId}`);

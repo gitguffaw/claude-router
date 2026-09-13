@@ -199,7 +199,7 @@ function routerHelpPayload() {
       "--lean[=auto|oauth|api] starts a minimal-context profile. OAuth uses --safe-mode; API credentials use --bare.",
       "--tools and --system-prompt override the lean profile's minimal defaults.",
       "--best, --sonnet, --opus, --haiku, --long-context, and --ultrathink remain legacy router conveniences; prefer live native selectors and fields.",
-      "--timeout-ms <milliseconds> bounds managed routed print jobs; use 0 to disable the managed timeout for that job."
+      "--timeout-ms <milliseconds> bounds managed routed print jobs (default 1800000ms / 30 minutes; 0 disables). 180000ms (3 minutes) is only for short smoke tests; raise it for medium effort or Explore/subagent fan-out."
     ],
     examples: [
       "claude-companion.mjs version",
@@ -434,6 +434,7 @@ async function runStoredJob(workspaceRoot, jobId, options = {}) {
     appendLogLine(logFile, `Invoking Claude ${stored.mode}.`);
     return runClaudePrintJob(workspaceRoot, stored.request, {
       env,
+      logFile,
       // Background workers are themselves process-group leaders; Claude stays attached.
       // Foreground companions detach Claude on POSIX and persist the child identity for cancel.
       detached: backgroundWorker ? false : undefined,

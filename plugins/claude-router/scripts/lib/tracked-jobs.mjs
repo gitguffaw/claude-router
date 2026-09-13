@@ -222,11 +222,12 @@ export async function runTrackedJob(job, runner, options = {}) {
       const status = execution.jobStatus ?? (execution.exitStatus === 0 ? "completed" : "failed");
       return {
         status,
-        phase: status === "completed" || status === "completed-with-warnings" ? "done" : status,
+        phase: execution.phase ?? (status === "completed" || status === "completed-with-warnings" ? "done" : status),
         result: execution.payload,
         rendered: execution.rendered,
         warnings: execution.warnings ?? [],
-        claudeSessionId: execution.claudeSessionId ?? null
+        claudeSessionId: execution.claudeSessionId ?? null,
+        claudeSessionPath: execution.claudeSessionPath ?? execution.payload?.claudeSessionPath ?? null
       };
     });
   } catch (error) {

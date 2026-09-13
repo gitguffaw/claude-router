@@ -10,4 +10,5 @@ user-invocable: false
 - If Claude review returns findings, present findings first and stop.
 - Do not auto-apply fixes from a review.
 - If Claude failed, report the failure and do not generate a replacement answer.
+- If a job timed out with `failureKind: killed-in-progress` or a `claudeSessionId`, report that the session was killed in progress. Include the job log path, session path, and `claude --resume` pointer. Do not describe this as an empty model failure.
 - If output is malformed, include the actionable parse or stderr detail and stop.

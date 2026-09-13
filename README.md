@@ -310,7 +310,13 @@ node plugins/claude-router/scripts/claude-companion.mjs cancel <job-id>
 
 `status --wait` rechecks the recorded worker and foreground companion on every polling cycle. It returns when the job completes, fails, is cancelled, or its tracked process is no longer active; a dead process is recorded as `failed` with phase `stale-process` instead of being reported as a wait timeout.
 
-The default `status --wait` deadline is 240 seconds. Use `--timeout-ms` to change it. The managed Claude process timeout defaults to 30 minutes; a host or MCP client may impose an additional deadline, so background mode is recommended for long work.
+The default `status --wait` deadline is 240 seconds. Use `--timeout-ms` to change it.
+
+The managed Claude print-job timeout defaults to **30 minutes** (`1800000` ms). Use `--timeout-ms` / `timeout_ms` to change it, or `0` to disable the managed timeout for that job. **`180000` ms (3 minutes) is only appropriate for short smoke tests.** Medium effort, multi-item briefs, and Explore/subagent fan-out need a higher bound; otherwise the router kills the process mid-flight and the print-mode JSON never arrives.
+
+A timeout kill is not the same as “the model said nothing.” When a Claude session exists, the job is still `failed` with `timedOut: true`, but the result records `failureKind: "killed-in-progress"`, attaches `claudeSessionId`, and includes the job log path, session path, and a `claude --resume` pointer. `failureKind: "timed-out-empty"` is reserved for a true hard-empty timeout (no session, no output).
+
+A host or MCP client may impose an additional deadline, so background mode is recommended for long work.
 
 ## Models, Controls, and Lean Profiles
 

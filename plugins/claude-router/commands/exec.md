@@ -1,6 +1,6 @@
 ---
 description: Run a policy-backed write-capable Claude execution job
-argument-hint: '[--background] [--lean[=auto|oauth|api]] [--model <selector>] [--effort <value>] [live Claude flags] [prompt]'
+argument-hint: '[--background] [--timeout-ms <ms>] [--lean[=auto|oauth|api]] [--model <selector>] [--effort <value>] [live Claude flags] [prompt]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---

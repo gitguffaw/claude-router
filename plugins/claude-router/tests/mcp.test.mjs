@@ -22,9 +22,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = path.join(ROOT, "scripts", "claude-router-mcp.mjs");
 const PLUGIN = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
 
-function request(proc, message) {
+function request(proc, message, timeoutMs = 20000) {
+  const expectedId = message.id;
   return new Promise((resolve, reject) => {
     let buffer = "";
+    const cleanup = () => {
+      clearTimeout(timer);
+      proc.stdout.off("data", onData);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`timeout waiting for JSON-RPC response id ${JSON.stringify(expectedId)}`));
+    }, timeoutMs);
     const onData = (chunk) => {
       buffer += String(chunk);
       let newline = buffer.indexOf("\n");
@@ -32,13 +41,20 @@ function request(proc, message) {
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
         if (line) {
-          proc.stdout.off("data", onData);
+          let parsed;
           try {
-            resolve(JSON.parse(line));
+            parsed = JSON.parse(line);
           } catch (error) {
+            cleanup();
             reject(error);
+            return;
           }
-          return;
+          // Ignore late/unrelated responses so a previous id cannot satisfy this request.
+          if (Object.prototype.hasOwnProperty.call(parsed, "id") && parsed.id === expectedId) {
+            cleanup();
+            resolve(parsed);
+            return;
+          }
         }
         newline = buffer.indexOf("\n");
       }
@@ -617,21 +633,22 @@ test("mcp outer timeout returns -32000 and server remains responsive", async () 
         arguments: { cwd: repo, prompt: "SLEEP past outer bound" }
       }
     });
+    assert.equal(timedOut.id, 2);
     assert.equal(timedOut.error?.code, -32000, JSON.stringify(timedOut));
     assert.match(timedOut.error.message, /outer timeout/i);
 
+    // Liveness must be in-process (tools/list / initialize). A follow-up
+    // companion dispatch would inherit the same 400ms outer bound.
     const stillAlive = await request(proc, {
       jsonrpc: "2.0",
       id: 3,
-      method: "tools/call",
-      params: {
-        name: "claude_router_models",
-        arguments: {}
-      }
+      method: "tools/list",
+      params: {}
     });
     assert.equal(stillAlive.error, undefined, JSON.stringify(stillAlive.error ?? {}));
     assert.equal(stillAlive.id, 3);
-    assert.ok(stillAlive.result?.content?.[0]?.text);
+    assert.ok(Array.isArray(stillAlive.result?.tools));
+    assert.ok(stillAlive.result.tools.some((tool) => tool.name === "claude_router_analyze"));
   } finally {
     proc.kill("SIGTERM");
   }

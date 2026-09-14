@@ -19,6 +19,10 @@ Use `--background` for a managed job that should return immediately. Follow it w
 
 Managed print jobs default to a 30-minute (`1800000` ms) wall-clock timeout. `--timeout-ms` / `timeout_ms` overrides it; `0` disables the managed timeout. `180000` ms (3 minutes) is only for short smoke tests. Raise the timeout for medium effort or Explore/subagent fan-out so Claude can finish synthesis. If the timeout still fires while a session is live, the job is `failed` / `timedOut` with `failureKind: "killed-in-progress"` and a resume pointer, not an empty-model failure.
 
+The companion process exits 1 when a foreground managed job is `failed`, `cancelled`, `interrupted`, or `blocked`. Print-mode JSON with `is_error` is `claude-error`; “Not logged in” is `auth-failed`. Neither is a successful model result.
+
+Claude’s `--add-dir` and other `...` flags are variadic. Managed print argv therefore ends options with `--` before the prompt.
+
 ## 2. Live CLI Discovery
 
 Claude’s models and flags change independently of Claude Router. The installed `claude` binary is therefore the runtime authority.

@@ -91,6 +91,24 @@ if (args.includes("-p")) {
   if (prompt.includes("CHANGE_FILE")) {
     fs.writeFileSync("changed-by-claude.txt", "changed\\n");
   }
+  if (prompt.includes("AUTH_FAIL")) {
+    console.log(JSON.stringify({
+      is_error: true,
+      result: "Not logged in · Please run /login",
+      session_id: "11111111-1111-4111-8111-111111111111",
+      terminal_reason: "api_error"
+    }));
+    process.exit(0);
+  }
+  if (prompt.includes("CLAUDE_ERROR")) {
+    console.log(JSON.stringify({
+      is_error: true,
+      result: "API connection timeout",
+      session_id: "22222222-2222-4222-8222-222222222222",
+      terminal_reason: "api_error"
+    }));
+    process.exit(0);
+  }
   console.log(JSON.stringify({ result: "Handled: " + prompt.slice(0, 40), session_id: "00000000-0000-4000-8000-000000000000" }));
   process.exit(0);
 }

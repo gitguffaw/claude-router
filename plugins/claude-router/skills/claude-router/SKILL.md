@@ -60,6 +60,7 @@ Do not replace a failed Claude run with a Codex-generated substitute answer.
 - `--best`, tier shorthands, `--long-context`, and `--ultrathink` are legacy compatibility conveniences. Prefer explicit live model selectors and native fields.
 - Native Claude fields are discovered from installed help and added to the routed surface dynamically. Use `surface` or `help` to inspect exact local behavior.
 - `--timeout-ms <milliseconds>` bounds managed routed Claude print jobs. Default is 1800000ms (30 minutes); `0` disables the managed timeout. 180000ms (3 minutes) is only for short smoke tests — raise it for medium effort or Explore/subagent fan-out. A timeout with a live Claude session is `killed-in-progress`, not an empty model failure.
+- Native flags such as `--add-dir` are emitted before `--` and the prompt. Do not put the prompt immediately after a variadic Claude flag.
 - `--background` returns a job id; use `status`, `result`, or `cancel` for follow-up.
 - For Claude commands that are not represented by a managed tool, call `surface` or `help` first, then use `raw` with exact Claude CLI args.
 

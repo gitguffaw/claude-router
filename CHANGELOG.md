@@ -7,6 +7,10 @@ All notable changes to Claude Router are documented here.
 ### Fixed
 
 - Timeout kills of managed print jobs now attach a discovered Claude session id when stdout JSON is missing, distinguish `killed-in-progress` from a hard-empty timeout, and include job log, session path, and a `claude --resume` pointer instead of reporting “no output.” Docs clarify that the 30-minute default is the managed bound and that `180000` ms is only for short smoke tests.
+- Managed print argv now ends native flags with `--` before the prompt, so variadic Claude flags such as `--add-dir` cannot swallow the prompt.
+- Print-mode JSON with `is_error` or “Not logged in / Please run /login” is `failed` with `failureKind` `claude-error` or `auth-failed`, not a successful model result.
+- Foreground companion now exits 1 when the stored job is `failed`, `cancelled`, `interrupted`, or `blocked`. `status` / `result` / `cancel` stay 0 on a successful control call.
+- Plugin MCP `tool_timeout_sec` is 2100 (35 minutes) so the host does not kill a 30-minute managed job at 15 minutes.
 
 ## [2.5.0] — 2026-09-02
 

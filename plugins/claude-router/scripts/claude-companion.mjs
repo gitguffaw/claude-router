@@ -58,6 +58,15 @@ function output(value, asJson) {
   process.stdout.write(asJson ? `${JSON.stringify(value, null, 2)}\n` : value);
 }
 
+const FAILED_MANAGED_JOB_STATUSES = new Set(["failed", "cancelled", "interrupted", "blocked"]);
+
+function applyManagedJobExit(job) {
+  const status = job?.status ?? job?.jobStatus;
+  if (FAILED_MANAGED_JOB_STATUSES.has(status)) {
+    process.exitCode = 1;
+  }
+}
+
 function parseNonNegativeTimeoutMs(value, defaultValue) {
   if (value === null || value === undefined || value === "") {
     return defaultValue;
@@ -552,6 +561,7 @@ async function runRouted(mode, { options, positionals }, { nativeControls, liveH
       });
       if (transition.job?.status === "cancelled" || isCancelInProgress(transition.job)) {
         const cancelled = cancelledJobResult(transition.job);
+        applyManagedJobExit(cancelled);
         output(options.json ? cancelled : `Cancelled Claude Router job ${cancelled.id}.\n`, Boolean(options.json));
         return;
       }
@@ -562,6 +572,7 @@ async function runRouted(mode, { options, positionals }, { nativeControls, liveH
   }
 
   const completed = await runStoredJob(workspaceRoot, jobId);
+  applyManagedJobExit(completed);
   if (options.json) {
     output(completed, true);
     return;
@@ -578,7 +589,8 @@ async function handleRunJob(argv) {
 
 async function runRunJob({ options, positionals }) {
   const cwd = resolveCwd(options);
-  await runStoredJob(cwd, positionals[0], { backgroundWorker: process.env.CLAUDE_ROUTER_BACKGROUND === "1" });
+  const completed = await runStoredJob(cwd, positionals[0], { backgroundWorker: process.env.CLAUDE_ROUTER_BACKGROUND === "1" });
+  applyManagedJobExit(completed);
 }
 
 async function handleUltrareview(argv) {

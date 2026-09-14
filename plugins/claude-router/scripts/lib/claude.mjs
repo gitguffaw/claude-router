@@ -109,7 +109,10 @@ export function buildClaudePrintArgs(request) {
   appendValue(args, "--system-prompt", controls.systemPrompt);
   const nativeControls = (request.nativeControls ?? []).filter((control) => !NATIVE_EMIT_SKIP.has(control.option));
   args.push(...nativeArgsFromParsedOptions(request.nativeOptions ?? {}, nativeControls));
-  args.push(request.prompt);
+  // Claude treats --add-dir / --tools / other `...` flags as variadic. A bare
+  // trailing prompt is eaten as another directory. `--` ends option parsing.
+  const prompt = request.prompt == null ? "" : String(request.prompt);
+  args.push("--", prompt);
   return args;
 }
 
@@ -138,7 +141,20 @@ function resolveJobSession(cwd, request, result, options = {}) {
   return { parsed, claudeSessionId, claudeSessionPath };
 }
 
-export function classifyClaudePrintFailure({ timedOut = false, rawOutput = "", claudeSessionId = null } = {}) {
+export function isClaudeAuthFailure(parsed, rawOutput = "", stderr = "") {
+  const text = [parsed?.result, parsed?.error, rawOutput, stderr]
+    .map((value) => String(value ?? ""))
+    .join("\n");
+  return /not logged in/i.test(text) || /please run \/login/i.test(text);
+}
+
+export function classifyClaudePrintFailure({
+  timedOut = false,
+  rawOutput = "",
+  claudeSessionId = null,
+  parsed = null,
+  stderr = ""
+} = {}) {
   const hasOutput = Boolean(String(rawOutput ?? "").trim());
   const hasSession = Boolean(claudeSessionId);
   if (timedOut && (hasSession || hasOutput)) {
@@ -146,6 +162,12 @@ export function classifyClaudePrintFailure({ timedOut = false, rawOutput = "", c
   }
   if (timedOut && !hasOutput && !hasSession) {
     return "timed-out-empty";
+  }
+  if (isClaudeAuthFailure(parsed, rawOutput, stderr)) {
+    return "auth-failed";
+  }
+  if (parsed && typeof parsed === "object" && parsed.is_error === true) {
+    return "claude-error";
   }
   if (!hasOutput && !hasSession) {
     return "empty";
@@ -182,7 +204,7 @@ export async function runClaudePrintJob(cwd, request, options = {}) {
       ? "Claude process tracking failed; child process tree was terminated."
       : "Claude process tracking failed; child process tree could not be confirmed terminated.";
     const rawOutput = "";
-    const failureKind = classifyClaudePrintFailure({ timedOut: false, rawOutput, claudeSessionId });
+    const failureKind = classifyClaudePrintFailure({ timedOut: false, rawOutput, claudeSessionId, parsed: null, stderr: message });
     return {
       exitStatus: 1,
       jobStatus: "failed",
@@ -215,7 +237,14 @@ export async function runClaudePrintJob(cwd, request, options = {}) {
   const rawOutput = result.stdout.trim();
   const gitAfter = options.readGitStatus?.();
   const timedOut = Boolean(result.timedOut);
-  const failureKind = classifyClaudePrintFailure({ timedOut, rawOutput, claudeSessionId });
+  const stderrText = result.stderr.trim();
+  const failureKind = classifyClaudePrintFailure({
+    timedOut,
+    rawOutput,
+    claudeSessionId,
+    parsed,
+    stderr: stderrText
+  });
   const warnings = [];
   if (timedOut) {
     warnings.push(
@@ -229,12 +258,18 @@ export async function runClaudePrintJob(cwd, request, options = {}) {
       });
     }
   }
+  if (failureKind === "auth-failed") {
+    warnings.push("Claude is not logged in. This is not a model result.");
+  } else if (failureKind === "claude-error") {
+    warnings.push("Claude reported an error in print-mode JSON (is_error).");
+  }
   if (!request.write && options.gitBefore?.available && gitAfter?.available && options.gitBefore.short !== gitAfter.short) {
     warnings.push("Read-only Claude route changed git status.");
   }
-  const jobStatus = !timedOut && result.status === 0 ? (warnings.length ? "completed-with-warnings" : "completed") : "failed";
+  const jobFailed = Boolean(timedOut || result.status !== 0 || failureKind);
+  const jobStatus = jobFailed ? "failed" : (warnings.length ? "completed-with-warnings" : "completed");
   return {
-    exitStatus: result.status,
+    exitStatus: jobFailed ? (result.status === 0 ? 1 : result.status) : 0,
     jobStatus,
     phase: timedOut ? "timed-out" : undefined,
     payload: {
@@ -307,6 +342,12 @@ export function renderClaudePayload(request, rawOutput, parsed, stderr, warnings
     lines.push("");
   } else if (meta.failureKind === "timed-out-empty") {
     lines.push("The managed job timed out with no captured Claude output or session.");
+    lines.push("");
+  } else if (meta.failureKind === "auth-failed") {
+    lines.push("Claude is not logged in. This is not a model result.");
+    lines.push("");
+  } else if (meta.failureKind === "claude-error") {
+    lines.push("Claude reported a print-mode error. This is not a successful model result.");
     lines.push("");
   }
   if (parsed?.result && meta.failureKind !== "killed-in-progress") {

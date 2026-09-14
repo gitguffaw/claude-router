@@ -601,7 +601,7 @@ test("managed routed jobs fail when the Claude process times out", () => {
   installFakeClaude(bin);
   initGitRepo(repo);
   const result = run("node", [SCRIPT, "analyze", "--json", "--timeout-ms", "250", "SLEEP"], { cwd: repo, env: buildEnv(bin, data), timeout: 5000 });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 1, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.status, "failed");
   assert.equal(payload.result.timedOut, true);
@@ -616,7 +616,7 @@ test("timeout with a live Claude session records session id and killed-in-progre
   initGitRepo(repo);
   const env = buildEnv(bin, data);
   const result = run("node", [SCRIPT, "analyze", "--json", "--timeout-ms", "250", "SLEEP"], { cwd: repo, env, timeout: 5000 });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 1, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.status, "failed");
   assert.equal(payload.phase, "timed-out");
@@ -647,7 +647,7 @@ test("timeout without a Claude session is a hard empty failure", () => {
   initGitRepo(repo);
   const env = { ...buildEnv(bin, data), FAKE_CLAUDE_NO_SESSION: "1" };
   const result = run("node", [SCRIPT, "analyze", "--json", "--timeout-ms", "250", "SLEEP"], { cwd: repo, env, timeout: 5000 });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 1, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.status, "failed");
   assert.equal(payload.result.timedOut, true);
@@ -658,6 +658,55 @@ test("timeout without a Claude session is a hard empty failure", () => {
   assert.doesNotMatch(payload.rendered, /Claude returned no output/);
 });
 
+test("not-logged-in print JSON is auth-failed, not a model result", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const result = run("node", [SCRIPT, "analyze", "--json", "AUTH_FAIL remaining work"], { cwd: repo, env: buildEnv(bin, data) });
+  assert.equal(result.status, 1, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.result.failureKind, "auth-failed");
+  assert.equal(payload.result.killedInProgress, false);
+  assert.match(payload.rendered, /not logged in/i);
+  assert.match(payload.rendered, /not a model result/i);
+  assert.match(payload.warnings.join("\n"), /not logged in/i);
+});
+
+test("is_error print JSON without login text is claude-error", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const result = run("node", [SCRIPT, "analyze", "--json", "CLAUDE_ERROR boom"], { cwd: repo, env: buildEnv(bin, data) });
+  assert.equal(result.status, 1, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.result.failureKind, "claude-error");
+  assert.match(payload.rendered, /print-mode error/i);
+});
+
+test("review --add-dir still delivers the prompt after option terminator", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const extra = makeTempDir();
+  const result = run("node", [SCRIPT, "review", "--json", "--add-dir", extra, "AUTH_FAIL judge receipts"], { cwd: repo, env: buildEnv(bin, data) });
+  assert.equal(result.status, 1, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.result.failureKind, "auth-failed");
+  const args = payload.result.args;
+  const stop = args.lastIndexOf("--");
+  assert.ok(stop >= 0);
+  assert.match(args[stop + 1], /AUTH_FAIL judge receipts/);
+  assert.equal(args[args.indexOf("--add-dir") + 1], extra);
+  assert.ok(args.indexOf("--add-dir") < stop);
+});
 
 test("status and result return stored jobs", () => {
   const repo = makeTempDir();
@@ -1183,7 +1232,7 @@ test("foreground job cancel kills Claude child and keeps cancelled terminal stat
       new Promise((resolve) => setTimeout(() => resolve({ code: null, signal: "timeout" }), 8000))
     ]);
     assert.notEqual(exit.signal, "timeout", `foreground companion did not exit after cancel: ${stderr}`);
-    assert.equal(exit.code, 0, `foreground companion exit=${exit.code} signal=${exit.signal} stderr=${stderr} stdout=${stdout}`);
+    assert.equal(exit.code, 1, `foreground companion exit=${exit.code} signal=${exit.signal} stderr=${stderr} stdout=${stdout}`);
 
     const terminal = JSON.parse(stdout);
     assert.equal(terminal.status, "cancelled", `foreground terminal payload: ${stdout}`);
@@ -1244,7 +1293,7 @@ test("foreground non-JSON cancel renders a cancelled terminal message", async ()
       new Promise((resolve) => setTimeout(() => resolve({ code: null, signal: "timeout" }), 8000))
     ]);
     assert.notEqual(exit.signal, "timeout", `foreground companion hung: ${stderr}`);
-    assert.equal(exit.code, 0, stderr);
+    assert.equal(exit.code, 1, stderr);
     assert.match(stdout, /cancelled/i);
     assert.equal(readStoredJobWithDataDir(repo, data, runningJob.id).status, "cancelled");
   } finally {

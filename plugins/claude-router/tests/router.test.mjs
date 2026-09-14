@@ -204,6 +204,24 @@ test("explicit empty tools string is preserved as --tools and empty argv entries
   assert.equal(multi[toolsIndexes[1] + 1], "");
 });
 
+test("print argv ends options before the prompt so variadic flags cannot eat it", () => {
+  const request = buildRouterRequest({
+    mode: "review",
+    prompt: "judge the receipts",
+    options: { "add-dir": ["/tmp/receipts", "/tmp/more"] }
+  });
+  const args = buildClaudePrintArgs(request);
+  const stop = args.lastIndexOf("--");
+  assert.notEqual(stop, -1);
+  assert.equal(args[stop + 1], request.prompt);
+  assert.equal(args.at(-1), request.prompt);
+  const addDirIndexes = args.map((arg, index) => (arg === "--add-dir" ? index : -1)).filter((index) => index >= 0);
+  assert.equal(addDirIndexes.length, 2);
+  assert.ok(addDirIndexes.every((index) => index < stop));
+  assert.equal(args[addDirIndexes[0] + 1], "/tmp/receipts");
+  assert.equal(args[addDirIndexes[1] + 1], "/tmp/more");
+});
+
 test("review target flags fail instead of pretending to scope the review", () => {
   for (const mode of ["analyze", "plan", "exec", "review", "adversarial-review"]) {
     assert.throws(() => buildRouterRequest({ mode, prompt: "x", options: { base: "main" } }), /does not yet support --base or --scope/);

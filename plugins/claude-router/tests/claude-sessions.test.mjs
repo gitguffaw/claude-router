@@ -104,6 +104,33 @@ test("classifyClaudePrintFailure distinguishes killed-in-progress from hard empt
   assert.equal(classifyClaudePrintFailure({ timedOut: true, rawOutput: "", claudeSessionId: null }), "timed-out-empty");
   assert.equal(classifyClaudePrintFailure({ timedOut: false, rawOutput: "", claudeSessionId: null }), "empty");
   assert.equal(classifyClaudePrintFailure({ timedOut: false, rawOutput: "ok", claudeSessionId: null }), null);
+  assert.equal(
+    classifyClaudePrintFailure({
+      timedOut: false,
+      rawOutput: JSON.stringify({ is_error: true, result: "Not logged in · Please run /login" }),
+      parsed: { is_error: true, result: "Not logged in · Please run /login" },
+      claudeSessionId: "11111111-1111-4111-8111-111111111111"
+    }),
+    "auth-failed"
+  );
+  assert.equal(
+    classifyClaudePrintFailure({
+      timedOut: false,
+      rawOutput: JSON.stringify({ is_error: true, result: "API connection timeout" }),
+      parsed: { is_error: true, result: "API connection timeout" },
+      claudeSessionId: "22222222-2222-4222-8222-222222222222"
+    }),
+    "claude-error"
+  );
+  assert.equal(
+    classifyClaudePrintFailure({
+      timedOut: true,
+      rawOutput: JSON.stringify({ is_error: true, result: "Not logged in · Please run /login" }),
+      parsed: { is_error: true, result: "Not logged in · Please run /login" },
+      claudeSessionId: "11111111-1111-4111-8111-111111111111"
+    }),
+    "killed-in-progress"
+  );
 });
 
 test("renderClaudePayload does not claim no output when a live session was killed", () => {

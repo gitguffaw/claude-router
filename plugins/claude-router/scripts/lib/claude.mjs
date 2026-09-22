@@ -10,6 +10,7 @@ import {
   sessionIdFromResumeValue,
   snapshotClaudeSessionIds
 } from "./claude-sessions.mjs";
+import { claudeTaskText, isLaunchNoiseText, parseClaudeStdout, startupAuthNotices, stripLaunchNoise } from "./host-view.mjs";
 
 export const DEFAULT_MANAGED_TIMEOUT_MS = 30 * 60 * 1000;
 export const SMOKE_TEST_TIMEOUT_MS = 180000;
@@ -58,16 +59,6 @@ export function getClaudeAuthStatus(cwd, env = process.env) {
   return { loggedIn: true, detail: result.stdout.trim() || "authenticated", raw: result.stdout };
 }
 
-export function getClaudeMcpStatus(cwd, env = process.env) {
-  const result = runCommand("claude", ["mcp", "list"], { cwd, env });
-  return { ok: !result.error && result.status === 0, detail: (result.stdout || result.stderr).trim() };
-}
-
-export function getClaudePluginStatus(cwd, env = process.env) {
-  const result = runCommand("claude", ["plugin", "list"], { cwd, env });
-  return { ok: !result.error && result.status === 0, detail: (result.stdout || result.stderr).trim() };
-}
-
 // --tools "" is a deliberate Claude security control (disable built-in tools).
 // Preserve an explicit empty string as the two argv entries: --tools, "".
 function appendTools(args, values) {
@@ -99,7 +90,7 @@ function appendBoolean(args, flag, enabled) {
 }
 
 export function buildClaudePrintArgs(request) {
-  const args = ["-p", "--output-format", request.outputFormat ?? "json", "--permission-mode", request.permissionMode ?? "default"];
+  const args = ["-p", "--output-format", request.outputFormat ?? "stream-json", "--permission-mode", request.permissionMode ?? "default"];
   const controls = request.controls ?? {};
   appendValue(args, "--model", controls.model);
   appendValue(args, "--effort", controls.effort);
@@ -109,6 +100,10 @@ export function buildClaudePrintArgs(request) {
   appendValue(args, "--system-prompt", controls.systemPrompt);
   const nativeControls = (request.nativeControls ?? []).filter((control) => !NATIVE_EMIT_SKIP.has(control.option));
   args.push(...nativeArgsFromParsedOptions(request.nativeOptions ?? {}, nativeControls));
+  const format = request.outputFormat ?? "stream-json";
+  if (format === "stream-json" && !args.includes("--verbose")) {
+    args.push("--verbose");
+  }
   // Claude treats --add-dir / --tools / other `...` flags as variadic. A bare
   // trailing prompt is eaten as another directory. `--` ends option parsing.
   const prompt = request.prompt == null ? "" : String(request.prompt);
@@ -122,7 +117,9 @@ function resumeSessionIdFromRequest(request) {
 
 function resolveJobSession(cwd, request, result, options = {}) {
   const env = options.env ?? process.env;
-  const parsed = parseJsonOrNull(result.stdout?.trim?.() ? result.stdout.trim() : result.stdout);
+  const parsed = options.parsed !== undefined
+    ? options.parsed
+    : parseClaudeStdout(result.stdout).parsed;
   const fromParsed = sessionIdFromParsed(parsed);
   const fromStdout = extractSessionIdFromText(result.stdout);
   const fromStderr = extractSessionIdFromText(result.stderr);
@@ -190,10 +187,12 @@ export async function runClaudePrintJob(cwd, request, options = {}) {
     onStdout: (chunk) => options.onProgress?.({ message: "Claude stdout", logBody: chunk }),
     onStderr: (chunk) => options.onProgress?.({ message: chunk.trim(), logBody: chunk })
   });
+  const extracted = parseClaudeStdout(result.stdout);
   const { parsed, claudeSessionId, claudeSessionPath } = resolveJobSession(cwd, request, result, {
     env,
     sessionSnapshot,
-    startedAtMs
+    startedAtMs,
+    parsed: extracted.parsed
   });
   if (result.trackingFailed) {
     const message = result.trackingError instanceof Error
@@ -234,7 +233,14 @@ export async function runClaudePrintJob(cwd, request, options = {}) {
       claudeSessionPath
     };
   }
-  const rawOutput = result.stdout.trim();
+  const rawOutput = extracted.rawOutput;
+  const blockingAuth = startupAuthNotices({
+    stdout: result.stdout,
+    stderr: result.stderr,
+    parsed,
+    rawOutput,
+    extra: extracted.blockingAuth
+  });
   const gitAfter = options.readGitStatus?.();
   const timedOut = Boolean(result.timedOut);
   const stderrText = result.stderr.trim();
@@ -282,6 +288,7 @@ export async function runClaudePrintJob(cwd, request, options = {}) {
       rawOutput,
       parsedOutput: parsed,
       stderr: result.stderr.trim(),
+      blockingAuth,
       gitAfter,
       failureKind,
       killedInProgress: failureKind === "killed-in-progress",
@@ -291,6 +298,7 @@ export async function runClaudePrintJob(cwd, request, options = {}) {
     rendered: renderClaudePayload(request, rawOutput, parsed, result.stderr, warnings, {
       timedOut,
       failureKind,
+      blockingAuth,
       claudeSessionId,
       claudeSessionPath,
       logFile: options.logFile,
@@ -324,15 +332,16 @@ export async function runClaudeUltrareview(cwd, options = {}) {
       stderr: result.stderr.trim()
     },
     warnings: [],
-    rendered: `# Claude Ultrareview\n\n${rawOutput || result.stderr.trim() || "No output."}\n`
+    rendered: `# Claude Ultrareview\n\n${rawOutput || stripLaunchNoise(result.stderr) || "Claude is ready."}\n`
   };
 }
 
 export function renderClaudePayload(request, rawOutput, parsed, stderr, warnings, meta = {}) {
   const lines = [`# Claude ${request.workflow}`, ""];
-  if (warnings.length) {
+  const visibleWarnings = (warnings ?? []).filter((warning) => !isLaunchNoiseText(warning));
+  if (visibleWarnings.length) {
     lines.push("Warnings:");
-    for (const warning of warnings) {
+    for (const warning of visibleWarnings) {
       lines.push(`- ${warning}`);
     }
     lines.push("");
@@ -350,26 +359,33 @@ export function renderClaudePayload(request, rawOutput, parsed, stderr, warnings
     lines.push("Claude reported a print-mode error. This is not a successful model result.");
     lines.push("");
   }
-  if (parsed?.result && meta.failureKind !== "killed-in-progress") {
-    lines.push(String(parsed.result).trim());
-  } else if (parsed && typeof parsed === "object" && meta.failureKind !== "killed-in-progress") {
-    lines.push("```json");
-    lines.push(JSON.stringify(parsed, null, 2));
-    lines.push("```");
-  } else if (rawOutput && meta.failureKind !== "killed-in-progress") {
-    lines.push(rawOutput);
-  } else if (!meta.timedOut && stderr) {
-    lines.push(stderr.trim());
-  } else if (!meta.timedOut && meta.failureKind !== "killed-in-progress") {
-    lines.push("Claude returned no output.");
+  const answer = claudeTaskText({ parsed, rawOutput, stderr, failureKind: meta.failureKind });
+  if (answer) {
+    lines.push(answer);
+  } else if (meta.failureKind === "empty") {
+    lines.push("Claude finished without a task result.");
+  } else if (!meta.timedOut && !meta.failureKind) {
+    lines.push("Claude is ready.");
   }
-  if (meta.logFile) {
+  const authNotices = startupAuthNotices({
+    stderr,
+    parsed,
+    rawOutput,
+    extra: meta.blockingAuth
+  }).filter((notice) => meta.failureKind !== "auth-failed" || !/not logged in/i.test(notice));
+  const renderedSoFar = lines.join("\n").toLowerCase();
+  const freshAuth = authNotices.filter((notice) => !renderedSoFar.includes(notice.toLowerCase()));
+  if (freshAuth.length) {
+    lines.push("", ...freshAuth);
+  }
+  const showSession = Boolean(meta.timedOut || meta.failureKind === "killed-in-progress");
+  if (showSession && meta.logFile) {
     lines.push("", `Job log: ${meta.logFile}`);
   }
-  if (meta.claudeSessionPath) {
+  if (showSession && meta.claudeSessionPath) {
     lines.push(`Claude session: ${meta.claudeSessionPath}`);
   }
-  const resume = buildResumeHint(meta.claudeSessionId, meta.cwd);
+  const resume = showSession ? buildResumeHint(meta.claudeSessionId, meta.cwd) : null;
   if (resume) {
     lines.push(`Resume: ${resume}`);
   } else if (meta.timedOut) {

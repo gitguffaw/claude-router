@@ -14,6 +14,7 @@ import {
   routedInputSchemaProperties
 } from "./lib/routed-controls.mjs";
 import { dynamicRoutedControls, schemaForLiveControl } from "./lib/live-controls.mjs";
+import { projectCompanionStdout, stripLaunchNoise } from "./lib/host-view.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const COMPANION = path.join(ROOT, "scripts", "claude-companion.mjs");
@@ -395,10 +396,16 @@ async function callTool(name, input = {}) {
   if (result.timedOut) {
     throw new Error(`Claude Router MCP outer timeout after ${outerTimeoutMs}ms`);
   }
-  if (result.status !== 0) {
-    throw new Error(formatProcessFailure(result));
+  const stdout = (result.stdout || "").trim();
+  // Managed jobs exit 1 on auth, timeout, and model errors. That is still a
+  // result: return the host view instead of the raw job record.
+  if (stdout.startsWith("{") || stdout.startsWith("[")) {
+    return projectCompanionStdout(stdout);
   }
-  return result.stdout.trim();
+  if (result.status !== 0 || result.error) {
+    throw new Error(stripLaunchNoise(formatProcessFailure(result)) || "process failed");
+  }
+  return projectCompanionStdout(stdout);
 }
 
 function send(message) {

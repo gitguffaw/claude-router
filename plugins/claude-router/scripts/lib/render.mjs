@@ -1,4 +1,4 @@
-import { isActiveJobStatus, readLogPreview } from "./tracked-jobs.mjs";
+import { isActiveJobStatus } from "./tracked-jobs.mjs";
 
 function escapeCell(value) {
   return String(value ?? "").replace(/\|/g, "\\|").replace(/\r?\n/g, " ").trim();
@@ -18,21 +18,18 @@ export function renderSetupReport(report) {
     "# Claude Router Setup",
     "",
     `Status: ${report.ready ? "ready" : "needs attention"}`,
-    "",
-    "Checks:",
-    `- node: ${report.node.detail}`,
-    `- claude: ${report.claude.detail}`,
-    `- auth: ${report.auth.detail}`,
-    `- plugins: ${report.plugins.ok ? "claude-router found" : report.plugins.checked ? "claude-router missing" : "not available"}`,
-    `- mcp: ${report.mcp.ok ? "claude-router found" : report.mcp.checked ? "claude-router missing" : "not available"}`
+    ""
   ];
-  if (report.nextSteps.length) {
-    lines.push("", "Next steps:");
+  if (report.ready) {
+    lines.push("Claude is ready.");
+  } else if (report.nextSteps?.length) {
     for (const step of report.nextSteps) {
       lines.push(`- ${step}`);
     }
+  } else {
+    lines.push("Claude is not ready.");
   }
-  return `${lines.join("\n")}\n`;
+  return `${lines.join("\n").trimEnd()}\n`;
 }
 
 export function renderStartedJob(job) {
@@ -68,14 +65,8 @@ export function renderStatusReport(jobs) {
 
 export function renderJobStatus(job) {
   const lines = [`# Claude Job ${job.id}`, "", `Status: ${job.status}`, `Kind: ${job.kindLabel ?? job.mode ?? ""}`, `Phase: ${job.phase ?? ""}`, `Elapsed: ${elapsed(job)}`];
-  if (job.contextPack?.id) {
-    lines.push(`Context pack: ${job.contextPack.id}`);
-  }
-  if (job.logFile) {
-    lines.push("", "Log preview:");
-    for (const line of readLogPreview(job.logFile)) {
-      lines.push(`- ${line}`);
-    }
+  if (job.status === "running" || job.status === "queued") {
+    lines.push("", "Claude is ready.");
   }
   return `${lines.join("\n").trimEnd()}\n`;
 }
@@ -85,25 +76,24 @@ export function renderStoredJobResult(job) {
     return "Claude Router job not found.\n";
   }
   const lines = [`# Claude Job Result ${job.id}`, "", `Status: ${job.status}`];
-  if (job.phase) {
-    lines.push(`Phase: ${job.phase}`);
+  const failureKind = job.result?.failureKind;
+  if (failureKind) {
+    lines.push(`Failure: ${failureKind}`);
   }
-  if (job.result?.failureKind) {
-    lines.push(`Failure: ${job.result.failureKind}`);
+  const showSession = failureKind === "killed-in-progress" || job.phase === "timed-out" || job.result?.timedOut;
+  if (showSession) {
+    if (job.logFile) {
+      lines.push(`Job log: ${job.logFile}`);
+    }
+    const sessionPath = job.claudeSessionPath || job.result?.claudeSessionPath;
+    if (sessionPath) {
+      lines.push(`Claude session: ${sessionPath}`);
+    }
+    if (job.claudeSessionId) {
+      lines.push(`Resume in Claude: claude --resume ${job.claudeSessionId}`);
+    }
   }
-  if (job.contextPack?.id) {
-    lines.push(`Context pack: ${job.contextPack.id}`);
-  }
-  if (job.logFile) {
-    lines.push(`Job log: ${job.logFile}`);
-  }
-  if (job.claudeSessionPath || job.result?.claudeSessionPath) {
-    lines.push(`Claude session: ${job.claudeSessionPath || job.result.claudeSessionPath}`);
-  }
-  if (job.claudeSessionId) {
-    lines.push(`Resume in Claude: claude --resume ${job.claudeSessionId}`);
-  }
-  lines.push("", job.rendered || JSON.stringify(job.result ?? {}, null, 2));
+  lines.push("", job.rendered || "Claude is ready.");
   return `${lines.join("\n").trimEnd()}\n`;
 }
 

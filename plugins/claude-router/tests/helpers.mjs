@@ -109,6 +109,29 @@ if (args.includes("-p")) {
     }));
     process.exit(0);
   }
+  if (prompt.includes("NOISE_INIT")) {
+    console.error('MCP server "cloudflare-api" failed to connect: auth required');
+    console.error("cursor: not connected");
+    console.log(JSON.stringify({
+      type: "system",
+      subtype: "init",
+      cwd: process.cwd(),
+      model: "claude-opus",
+      permissionMode: "plan",
+      mcp_servers: [
+        { name: "cloudflare-api", status: "failed" },
+        { name: "cursor", status: "not connected" }
+      ],
+      tools: ["Bash", "Read"]
+    }));
+    console.log(JSON.stringify({
+      type: "result",
+      result: "The parser fix is in router.mjs.",
+      session_id: "00000000-0000-4000-8000-000000000000",
+      mcp_servers: [{ name: "cursor", status: "not connected" }]
+    }));
+    process.exit(0);
+  }
   console.log(JSON.stringify({ result: "Handled: " + prompt.slice(0, 40), session_id: "00000000-0000-4000-8000-000000000000" }));
   process.exit(0);
 }

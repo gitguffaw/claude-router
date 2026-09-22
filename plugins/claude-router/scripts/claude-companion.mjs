@@ -5,7 +5,8 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
 import { parseClaudeArgv } from "./lib/command-parser.mjs";
-import { getClaudeAuthStatus, getClaudeAvailability, getClaudeMcpStatus, getClaudePluginStatus, runClaudePrintJob, runClaudeUltrareview } from "./lib/claude.mjs";
+import { getClaudeAuthStatus, getClaudeAvailability, runClaudePrintJob, runClaudeUltrareview } from "./lib/claude.mjs";
+import { stripLaunchNoise } from "./lib/host-view.mjs";
 import { createContextPack } from "./lib/context-pack.mjs";
 import { handleCancel, handleResult, handleStatus } from "./lib/job-commands.mjs";
 import { renderModelCatalog, renderSetupReport, renderStartedJob } from "./lib/render.mjs";
@@ -83,39 +84,24 @@ async function buildSetupReport(cwd) {
   const node = binaryAvailable("node", ["--version"], { cwd });
   const claude = getClaudeAvailability(cwd);
   const auth = claude.available ? getClaudeAuthStatus(cwd) : { loggedIn: false, detail: "claude unavailable" };
-  const rawPlugins = claude.available ? getClaudePluginStatus(cwd) : { ok: false, detail: "" };
-  const rawMcp = claude.available ? getClaudeMcpStatus(cwd) : { ok: false, detail: "" };
-  const plugins = {
-    ...rawPlugins,
-    ok: rawPlugins.ok && /claude-router/i.test(rawPlugins.detail || ""),
-    checked: rawPlugins.ok
-  };
-  const mcp = {
-    ...rawMcp,
-    ok: rawMcp.ok && /claude-router/i.test(rawMcp.detail || ""),
-    checked: rawMcp.ok
-  };
   const nextSteps = [];
+  if (!node.available) {
+    nextSteps.push("Install Node.js 18.18 or newer, then rerun setup.");
+  }
   if (!claude.available) {
     nextSteps.push("Install Claude Code, then rerun setup.");
   }
   if (claude.available && !auth.loggedIn) {
     nextSteps.push("Run `claude auth login` or the appropriate Claude Code auth flow.");
   }
-  if (claude.available && !plugins.ok) {
-    nextSteps.push("Install or enable the Claude Router Claude Code plugin, then rerun setup.");
-  }
-  if (claude.available && !mcp.ok) {
-    nextSteps.push("Register or reconnect the claude-router MCP server if this host should expose router tools through Claude MCP.");
-  }
   return {
-    ready: node.available && claude.available && auth.loggedIn && plugins.ok && mcp.ok,
-    coreReady: node.available && claude.available && auth.loggedIn,
-    node,
-    claude,
-    auth,
-    plugins,
-    mcp,
+    ready: node.available && claude.available && auth.loggedIn,
+    node: { available: node.available, detail: stripLaunchNoise(node.detail) || node.detail },
+    claude: { available: claude.available, detail: stripLaunchNoise(claude.detail) || claude.detail },
+    auth: {
+      loggedIn: Boolean(auth.loggedIn),
+      detail: stripLaunchNoise(auth.detail) || (auth.loggedIn ? "authenticated" : "not logged in")
+    },
     nextSteps
   };
 }
@@ -178,20 +164,27 @@ function commandPayload(result) {
 
 function renderCommandPayload(title, payload) {
   const lines = [`# ${title}`, "", `Status: ${payload.status}${payload.timedOut ? " (timed out)" : ""}`];
-  if (payload.stdout) {
-    lines.push("", "STDOUT:", "```", payload.stdout.trimEnd(), "```");
+  const stdout = String(payload.stdout ?? "").trim();
+  const stderr = stripLaunchNoise(payload.stderr || "");
+  if (stdout) {
+    lines.push("", "STDOUT:", "```", stdout, "```");
   }
-  if (payload.stderr) {
-    lines.push("", "STDERR:", "```", payload.stderr.trimEnd(), "```");
+  if (stderr) {
+    lines.push("", "STDERR:", "```", stderr, "```");
   }
-  if (payload.error) {
-    lines.push("", `Error: ${payload.error}`);
+  const error = stripLaunchNoise(payload.error || "");
+  if (error) {
+    lines.push("", `Error: ${error}`);
   }
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
 function commandText(payload) {
-  return (payload.stdout || payload.stderr || payload.error || `exit ${payload.status}`).trim();
+  const stdout = String(payload.stdout ?? "").trim();
+  if (stdout) {
+    return stdout;
+  }
+  return (stripLaunchNoise(payload.stderr) || stripLaunchNoise(payload.error) || `exit ${payload.status}`).trim();
 }
 
 function routerHelpPayload() {

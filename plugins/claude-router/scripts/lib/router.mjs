@@ -2,11 +2,11 @@ import { resolveClaudeControls } from "./model-resolution.mjs";
 import { NATIVE_SEED_CONTROLS, ROUTER_OWNED_OPTIONS } from "./routed-controls.mjs";
 
 const MODE_CONFIG = {
-  analyze: { workflow: "Analyze", write: false, defaultPermissionMode: "plan", outputFormat: "json" },
-  plan: { workflow: "Plan", write: false, defaultPermissionMode: "plan", outputFormat: "json" },
-  exec: { workflow: "Exec", write: true, defaultPermissionMode: "acceptEdits", outputFormat: "json" },
-  review: { workflow: "Review", write: false, defaultPermissionMode: "plan", outputFormat: "json" },
-  "adversarial-review": { workflow: "Adversarial Review", write: false, defaultPermissionMode: "plan", outputFormat: "json" }
+  analyze: { workflow: "Analyze", write: false, defaultPermissionMode: "plan", outputFormat: "stream-json" },
+  plan: { workflow: "Plan", write: false, defaultPermissionMode: "plan", outputFormat: "stream-json" },
+  exec: { workflow: "Exec", write: true, defaultPermissionMode: "acceptEdits", outputFormat: "stream-json" },
+  review: { workflow: "Review", write: false, defaultPermissionMode: "plan", outputFormat: "stream-json" },
+  "adversarial-review": { workflow: "Adversarial Review", write: false, defaultPermissionMode: "plan", outputFormat: "stream-json" }
 };
 
 function requirePrompt(prompt) {

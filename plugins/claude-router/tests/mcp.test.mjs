@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { buildEnv, initGitRepo, installFakeClaude, makeTempDir } from "./helpers.mjs";
+import { readJobFile } from "../scripts/lib/state.mjs";
 import {
   schemaFor,
   validateAgainstSchema,
@@ -21,6 +22,31 @@ import { MCP_TOOLS } from "../scripts/lib/router-commands.mjs";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = path.join(ROOT, "scripts", "claude-router-mcp.mjs");
 const PLUGIN = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
+
+function readStored(dataDir, cwd, id) {
+  const previous = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = dataDir;
+  try {
+    return readJobFile(cwd, id);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previous;
+    }
+  }
+}
+
+function assertHostView(text) {
+  const payload = JSON.parse(text);
+  assert.equal(payload.request, undefined);
+  assert.equal(payload.stderr, undefined);
+  assert.equal(payload.args, undefined);
+  assert.equal(payload.workspaceRoot, undefined);
+  assert.equal(payload.result, undefined);
+  assert.doesNotMatch(text, /mcp_servers|not connected|failed to connect/);
+  return payload;
+}
 
 function request(proc, message, timeoutMs = 20000) {
   const expectedId = message.id;
@@ -320,9 +346,10 @@ test("mcp server returns invalid-params without launching companion for contract
 test("mcp routed tools preserve explicit empty tools string", async () => {
   const bin = makeTempDir();
   const repo = makeTempDir();
+  const data = makeTempDir();
   installFakeClaude(bin);
   initGitRepo(repo);
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
   try {
     await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     const result = await request(proc, {
@@ -335,8 +362,8 @@ test("mcp routed tools preserve explicit empty tools string", async () => {
       }
     });
     assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    const payload = JSON.parse(result.result.content[0].text);
-    const args = payload.result.args;
+    const payload = assertHostView(result.result.content[0].text);
+    const args = readStored(data, repo, payload.id).result.args;
     const index = args.indexOf("--tools");
     assert.notEqual(index, -1, `missing --tools in ${JSON.stringify(args)}`);
     assert.equal(args[index + 1], "");
@@ -348,9 +375,10 @@ test("mcp routed tools preserve explicit empty tools string", async () => {
 test("mcp discovers and forwards a native Claude field added after the router release", async () => {
   const bin = makeTempDir();
   const repo = makeTempDir();
+  const data = makeTempDir();
   installFakeClaude(bin);
   initGitRepo(repo);
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
   try {
     await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     const result = await request(proc, {
@@ -363,10 +391,11 @@ test("mcp discovers and forwards a native Claude field added after the router re
       }
     });
     assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    const payload = JSON.parse(result.result.content[0].text);
-    const index = payload.result.args.indexOf("--future-flag");
+    const payload = assertHostView(result.result.content[0].text);
+    const args = readStored(data, repo, payload.id).result.args;
+    const index = args.indexOf("--future-flag");
     assert.notEqual(index, -1);
-    assert.equal(payload.result.args[index + 1], "future-value");
+    assert.equal(args[index + 1], "future-value");
   } finally {
     proc.kill("SIGTERM");
   }
@@ -375,9 +404,10 @@ test("mcp discovers and forwards a native Claude field added after the router re
 test("mcp prompt argument boundary treats dash-leading prompts as data", async () => {
   const bin = makeTempDir();
   const repo = makeTempDir();
+  const data = makeTempDir();
   installFakeClaude(bin);
   initGitRepo(repo);
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
   try {
     await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     for (const [id, prompt] of [
@@ -395,16 +425,17 @@ test("mcp prompt argument boundary treats dash-leading prompts as data", async (
         }
       });
       assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-      const payload = JSON.parse(result.result.content[0].text);
+      const payload = assertHostView(result.result.content[0].text);
+      const job = readStored(data, repo, payload.id);
       // Exact flag-like prompt is stored as userRequest data.
-      assert.equal(payload.request.userRequest, prompt);
-      assert.equal(payload.request.permissionMode, "plan");
+      assert.equal(job.request.userRequest, prompt);
+      assert.equal(job.request.permissionMode, "plan");
       // Not interpreted as router controls.
-      assert.equal(payload.request.nativeOptions.debug, undefined);
-      assert.equal(payload.request.controls.tools.length === 0 || payload.request.controls.tools === "", true);
-      const claudeArgs = payload.result.args;
-      assert.equal(claudeArgs.at(-1), payload.request.prompt);
-      assert.match(payload.request.prompt, new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      assert.equal(job.request.nativeOptions.debug, undefined);
+      assert.equal(job.request.controls.tools.length === 0 || job.request.controls.tools === "", true);
+      const claudeArgs = job.result.args;
+      assert.equal(claudeArgs.at(-1), job.request.prompt);
+      assert.match(job.request.prompt, new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     }
 
     const structured = await request(proc, {
@@ -422,15 +453,16 @@ test("mcp prompt argument boundary treats dash-leading prompts as data", async (
       }
     });
     assert.equal(structured.error, undefined, JSON.stringify(structured.error ?? {}));
-    const structuredPayload = JSON.parse(structured.result.content[0].text);
-    assert.equal(structuredPayload.request.userRequest, "--looks-like-flag but is prompt");
-    assert.equal(structuredPayload.request.permissionMode, "plan");
-    assert.equal(structuredPayload.request.controls.model, "sonnet");
-    const structuredArgs = structuredPayload.result.args;
+    const structuredPayload = assertHostView(structured.result.content[0].text);
+    const structuredJob = readStored(data, repo, structuredPayload.id);
+    assert.equal(structuredJob.request.userRequest, "--looks-like-flag but is prompt");
+    assert.equal(structuredJob.request.permissionMode, "plan");
+    assert.equal(structuredJob.request.controls.model, "sonnet");
+    const structuredArgs = structuredJob.result.args;
     assert.ok(structuredArgs.includes("--model"));
     assert.ok(structuredArgs.includes("sonnet"));
-    assert.equal(structuredArgs.at(-1), structuredPayload.request.prompt);
-    assert.match(structuredPayload.request.prompt, /--looks-like-flag but is prompt/);
+    assert.equal(structuredArgs.at(-1), structuredJob.request.prompt);
+    assert.match(structuredJob.request.prompt, /--looks-like-flag but is prompt/);
   } finally {
     proc.kill("SIGTERM");
   }
@@ -463,9 +495,10 @@ test("mcp raw tool preserves guardrails through global Claude flags", async () =
 test("mcp valid analyze call still succeeds with closed schema", async () => {
   const bin = makeTempDir();
   const repo = makeTempDir();
+  const data = makeTempDir();
   installFakeClaude(bin);
   initGitRepo(repo);
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
   try {
     await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     const result = await request(proc, {
@@ -483,9 +516,12 @@ test("mcp valid analyze call still succeeds with closed schema", async () => {
       }
     });
     assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    const payload = JSON.parse(result.result.content[0].text);
-    assert.equal(payload.request.userRequest, "normal prompt");
-    assert.equal(payload.request.permissionMode, "plan");
+    const payload = assertHostView(result.result.content[0].text);
+    assert.equal(payload.ready, true);
+    assert.match(payload.output, /Handled:/);
+    const job = readStored(data, repo, payload.id);
+    assert.equal(job.request.userRequest, "normal prompt");
+    assert.equal(job.request.permissionMode, "plan");
   } finally {
     proc.kill("SIGTERM");
   }
@@ -494,9 +530,10 @@ test("mcp valid analyze call still succeeds with closed schema", async () => {
 test("mcp exec accepts a live permission_mode without freezing an enum", async () => {
   const bin = makeTempDir();
   const repo = makeTempDir();
+  const data = makeTempDir();
   installFakeClaude(bin);
   initGitRepo(repo);
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
   try {
     await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     const list = await request(proc, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
@@ -519,9 +556,59 @@ test("mcp exec accepts a live permission_mode without freezing an enum", async (
       }
     });
     assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    const payload = JSON.parse(result.result.content[0].text);
-    assert.equal(payload.request.permissionMode, "auto");
-    assert.equal(payload.request.write, true);
+    const payload = assertHostView(result.result.content[0].text);
+    const job = readStored(data, repo, payload.id);
+    assert.equal(job.request.permissionMode, "auto");
+    assert.equal(job.request.write, true);
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("mcp host view omits Claude startup noise and launch details", async () => {
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const noise = await request(proc, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "claude_router_analyze",
+        arguments: { cwd: repo, prompt: "NOISE_INIT check the parser" }
+      }
+    });
+    assert.equal(noise.error, undefined, JSON.stringify(noise.error ?? {}));
+    const payload = assertHostView(noise.result.content[0].text);
+    assert.equal(payload.ready, true);
+    assert.match(payload.output, /The parser fix is in router\.mjs\./);
+    assert.match(payload.output, /cloudflare-api needs authentication/);
+    assert.doesNotMatch(payload.output, /not connected|failed to connect|mcp_servers/);
+    assert.equal(payload.failureKind, undefined);
+    const stored = readStored(data, repo, payload.id);
+    assert.match(stored.result.stderr, /not connected/);
+    assert.match(JSON.stringify(stored.result.parsedOutput), /mcp_servers/);
+
+    const auth = await request(proc, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "claude_router_analyze",
+        arguments: { cwd: repo, prompt: "AUTH_FAIL remaining work" }
+      }
+    });
+    assert.equal(auth.error, undefined, JSON.stringify(auth.error ?? {}));
+    const authPayload = assertHostView(auth.result.content[0].text);
+    assert.equal(authPayload.ready, false);
+    assert.equal(authPayload.failureKind, "auth-failed");
+    assert.match(authPayload.output, /not logged in/i);
+    assert.doesNotMatch(auth.result.content[0].text, /--permission-mode|session_id|args/);
   } finally {
     proc.kill("SIGTERM");
   }
@@ -729,6 +816,7 @@ test("mcp relative cwd is resolved once against server cwd (no double segment)",
   // DEFECT: relative cwd used as spawn cwd and again as --cwd → companion path.resolve
   // against already-chdir'd process.cwd produced …/myrepo/myrepo.
   const bin = makeTempDir();
+  const data = makeTempDir();
   const base = makeTempDir();
   const myrepo = path.join(base, "myrepo");
   fs.mkdirSync(myrepo, { recursive: true });
@@ -737,7 +825,7 @@ test("mcp relative cwd is resolved once against server cwd (no double segment)",
   const doubleSegment = path.join(myrepo, "myrepo");
   assert.equal(fs.existsSync(doubleSegment), false);
 
-  const proc = spawn("node", [SERVER], { cwd: base, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  const proc = spawn("node", [SERVER], { cwd: base, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
   try {
     await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     const result = await request(proc, {
@@ -750,17 +838,18 @@ test("mcp relative cwd is resolved once against server cwd (no double segment)",
       }
     });
     assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    const payload = JSON.parse(result.result.content[0].text);
+    const payload = assertHostView(result.result.content[0].text);
+    const workspaceRoot = readStored(data, myrepo, payload.id).workspaceRoot;
     // Strongest observable: job workspace is base/myrepo, not base/myrepo/myrepo.
     // realpath: macOS /var vs /private/var; git may report either form.
-    assert.equal(fs.realpathSync(payload.workspaceRoot), fs.realpathSync(myrepo));
+    assert.equal(fs.realpathSync(workspaceRoot), fs.realpathSync(myrepo));
     assert.equal(fs.existsSync(doubleSegment), false);
     assert.notEqual(
-      path.normalize(payload.workspaceRoot).replace(/\/+$/, ""),
+      path.normalize(workspaceRoot).replace(/\/+$/, ""),
       path.normalize(doubleSegment).replace(/\/+$/, "")
     );
-    assert.match(payload.workspaceRoot, /myrepo$/);
-    assert.doesNotMatch(payload.workspaceRoot, /myrepo[/\\]myrepo$/);
+    assert.match(workspaceRoot, /myrepo$/);
+    assert.doesNotMatch(workspaceRoot, /myrepo[/\\]myrepo$/);
   } finally {
     proc.kill("SIGTERM");
   }
@@ -769,9 +858,10 @@ test("mcp relative cwd is resolved once against server cwd (no double segment)",
 test("mcp absolute cwd is unchanged (regression pin)", async () => {
   const bin = makeTempDir();
   const repo = makeTempDir();
+  const data = makeTempDir();
   installFakeClaude(bin);
   initGitRepo(repo);
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
   try {
     await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     const result = await request(proc, {
@@ -784,8 +874,8 @@ test("mcp absolute cwd is unchanged (regression pin)", async () => {
       }
     });
     assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    const payload = JSON.parse(result.result.content[0].text);
-    assert.equal(fs.realpathSync(payload.workspaceRoot), fs.realpathSync(repo));
+    const payload = assertHostView(result.result.content[0].text);
+    assert.equal(fs.realpathSync(readStored(data, repo, payload.id).workspaceRoot), fs.realpathSync(repo));
   } finally {
     proc.kill("SIGTERM");
   }

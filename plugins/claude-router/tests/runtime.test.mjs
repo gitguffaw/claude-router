@@ -114,18 +114,21 @@ test("setup reports ready with fake claude", () => {
   assert.match(payload.claude.detail, /2.1.185/);
 });
 
-test("setup reports not ready when Claude Router plugin or MCP registration is missing", () => {
+test("setup stays ready without reporting plugin or MCP registration", () => {
   const bin = makeTempDir();
   const data = makeTempDir();
   installFakeClaudeWithoutRouter(bin);
-  const result = run("node", [SCRIPT, "setup", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
+  const result = run("node", [SCRIPT, "setup"], { cwd: ROOT, env: buildEnv(bin, data) });
   assert.equal(result.status, 0, result.stderr);
-  const payload = JSON.parse(result.stdout);
-  assert.equal(payload.coreReady, true);
-  assert.equal(payload.ready, false);
-  assert.equal(payload.plugins.ok, false);
-  assert.equal(payload.mcp.ok, false);
-  assert.match(payload.nextSteps.join("\n"), /Claude Router Claude Code plugin/);
+  assert.match(result.stdout, /Claude is ready\./);
+  assert.doesNotMatch(result.stdout, /mcp|plugin|not connected/i);
+  const json = run("node", [SCRIPT, "setup", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
+  assert.equal(json.status, 0, json.stderr);
+  const payload = JSON.parse(json.stdout);
+  assert.equal(payload.ready, true);
+  assert.equal(payload.plugins, undefined);
+  assert.equal(payload.mcp, undefined);
+  assert.equal(payload.coreReady, undefined);
 });
 
 test("surface reports local claude help", () => {
@@ -560,6 +563,19 @@ test("--raw-arg-string rejects malformed marker usage", () => {
   });
   assert.notEqual(extra.status, 0);
   assert.match(extra.stderr, /--raw-arg-string requires exactly one following token/);
+});
+
+test("routed text hides Claude startup MCP noise and launch details", () => {
+  const repo = makeTempDir();
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const result = run("node", [SCRIPT, "analyze", "NOISE_INIT check the parser"], { cwd: repo, env: buildEnv(bin, data) });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /The parser fix is in router\.mjs\./);
+  assert.match(result.stdout, /cloudflare-api needs authentication/);
+  assert.doesNotMatch(result.stdout, /mcp_servers|not connected|failed to connect|Job log:|Claude session:|permissionMode/i);
 });
 
 test("analyze stores completed job and context pack", () => {

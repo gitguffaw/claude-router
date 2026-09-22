@@ -4,6 +4,12 @@ All notable changes to Claude Router are documented here.
 
 ## Unreleased
 
+## [2.5.2] — 2026-09-22
+
+### Changed
+
+- Host-facing setup, status, result, and MCP tool output now returns whether Claude is ready plus the task result. MCP servers that did not connect, launch arguments, and session plumbing stay in the on-disk job record (`--json` on the companion) and are not sent back to the calling model. Managed print runs use Claude's stream format internally so an authentication failure in the startup event is still included, by server name. A managed failure still returns that host view, with `failureKind` when the run itself failed.
+
 ## [2.5.1] — 2026-09-13
 
 ### Fixed

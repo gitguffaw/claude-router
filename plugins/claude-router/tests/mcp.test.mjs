@@ -665,6 +665,99 @@ test("mcp tools/call rejects permission bypass unless allow_dangerous consents",
   }
 });
 
+test("read-only mcp tools lock permission_mode to plan and reject bypass before launch", async () => {
+  const readOnlyTools = [
+    ["claude_router_analyze", "analyze"],
+    ["claude_router_plan", "plan"],
+    ["claude_router_review", "review"],
+    ["claude_router_adversarial_review", "adversarial-review"]
+  ];
+  const dangerousProperty = /danger|bypass|skip[-_]permission|always[-_]approve/i;
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const list = await request(proc, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    const toolByName = new Map(list.result.tools.map((tool) => [tool.name, tool]));
+    for (const [name] of readOnlyTools) {
+      const schema = toolByName.get(name).inputSchema;
+      assert.equal(schema.additionalProperties, false, name);
+      assert.deepEqual(schema.properties.permission_mode.enum, ["plan"], name);
+      assert.deepEqual(schema.required, ["prompt"], name);
+      for (const key of Object.keys(schema.properties)) {
+        assert.doesNotMatch(key, dangerousProperty, `${name} exposes ${key}`);
+      }
+    }
+
+    const rejectedInputs = [
+      [{ permission_mode: "acceptEdits" }, /permission_mode must be one of: plan/],
+      [{ permission_mode: "bypassPermissions" }, /permission_mode must be one of: plan/],
+      [{ allow_dangerous: true }, /Unknown property "allow_dangerous"/],
+      [{ dangerously_skip_permissions: true }, /Unknown property "dangerously_skip_permissions"/],
+      [{ allow_dangerously_skip_permissions: true }, /Unknown property "allow_dangerously_skip_permissions"/],
+      [{ bypass_permissions: true }, /Unknown property "bypass_permissions"/],
+      [{ "permission-mode": "bypassPermissions" }, /Unknown property "permission-mode"/]
+    ];
+    let id = 3;
+    for (const [name] of readOnlyTools) {
+      if (name === "claude_router_analyze") {
+        continue;
+      }
+      for (const [extra, pattern] of rejectedInputs) {
+        const blocked = await request(proc, {
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: {
+            name,
+            arguments: { cwd: repo, prompt: "read only", ...extra }
+          }
+        });
+        id += 1;
+        assert.equal(blocked.error?.code, -32602, `${name} ${JSON.stringify(extra)} ${JSON.stringify(blocked)}`);
+        assert.match(blocked.error.message, pattern, `${name} ${JSON.stringify(blocked)}`);
+      }
+    }
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 0);
+
+    for (const [name, mode] of readOnlyTools) {
+      if (name === "claude_router_analyze") {
+        continue;
+      }
+      const result = await request(proc, {
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: {
+          name,
+          arguments: { cwd: repo, prompt: `${mode} stays read-only`, permission_mode: "plan" }
+        }
+      });
+      id += 1;
+      assert.equal(result.error, undefined, `${name} ${JSON.stringify(result.error ?? {})}`);
+      const payload = assertHostView(result.result.content[0].text);
+      assert.equal(payload.mode, mode, name);
+      assert.equal(payload.ready, true, name);
+      const job = readStored(data, repo, payload.id);
+      assert.equal(job.mode, mode, name);
+      assert.equal(job.write, false, name);
+      assert.equal(job.request.write, false, name);
+      assert.equal(job.request.permissionMode, "plan", name);
+      const args = job.result.args;
+      assert.equal(args[args.indexOf("--permission-mode") + 1], "plan", name);
+      assert.equal(args.includes("bypassPermissions"), false, name);
+      assert.equal(args.includes("--dangerously-skip-permissions"), false, name);
+    }
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 3);
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
 test("mcp host view omits Claude startup noise and launch details", async () => {
   const bin = makeTempDir();
   const repo = makeTempDir();

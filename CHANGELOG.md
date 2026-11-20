@@ -4,6 +4,10 @@ All notable changes to Claude Router are documented here.
 
 ## Unreleased
 
+### Fixed
+
+- Claude Code now starts the plugin's MCP server. The server is declared in `.claude-plugin/plugin.json` with `${CLAUDE_PLUGIN_ROOT}` paths, because Claude Code resolved the relative paths in `.mcp.json` against the session's working directory and the server exited with "Connection closed". `.mcp.json` is unchanged and stays relative for Codex, which resolves it against the plugin root and does not expand `${CLAUDE_PLUGIN_ROOT}`.
+
 ## [2.5.2] — 2026-09-22
 
 ### Changed

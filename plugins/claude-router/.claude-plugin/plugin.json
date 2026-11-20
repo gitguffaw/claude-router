@@ -17,5 +17,15 @@
     "models",
     "review",
     "delegation"
-  ]
+  ],
+  "mcpServers": {
+    "claude-router": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/claude-router-mcp.mjs"
+      ],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}",
+      "tool_timeout_sec": 2100
+    }
+  }
 }

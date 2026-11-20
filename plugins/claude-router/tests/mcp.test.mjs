@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { buildEnv, initGitRepo, installFakeClaude, makeTempDir } from "./helpers.mjs";
-import { readJobFile } from "../scripts/lib/state.mjs";
+import { listJobs, readJobFile } from "../scripts/lib/state.mjs";
 import {
   schemaFor,
   validateAgainstSchema,
@@ -23,11 +23,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = path.join(ROOT, "scripts", "claude-router-mcp.mjs");
 const PLUGIN = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
 
-function readStored(dataDir, cwd, id) {
+function withRouterData(dataDir, fn) {
   const previous = process.env.CLAUDE_ROUTER_DATA;
   process.env.CLAUDE_ROUTER_DATA = dataDir;
   try {
-    return readJobFile(cwd, id);
+    return fn();
   } finally {
     if (previous === undefined) {
       delete process.env.CLAUDE_ROUTER_DATA;
@@ -35,6 +35,10 @@ function readStored(dataDir, cwd, id) {
       process.env.CLAUDE_ROUTER_DATA = previous;
     }
   }
+}
+
+function readStored(dataDir, cwd, id) {
+  return withRouterData(dataDir, () => readJobFile(cwd, id));
 }
 
 function assertHostView(text) {
@@ -560,6 +564,102 @@ test("mcp exec accepts a live permission_mode without freezing an enum", async (
     const job = readStored(data, repo, payload.id);
     assert.equal(job.request.permissionMode, "auto");
     assert.equal(job.request.write, true);
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("mcp tools/call rejects permission bypass unless allow_dangerous consents", async () => {
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const rejected = [
+      ["claude_router_exec", { prompt: "bypass via permission mode", permission_mode: "bypassPermissions" }],
+      ["claude_router_exec", { prompt: "bypass via skip flag", dangerously_skip_permissions: true }],
+      ["claude_router_exec", { prompt: "bypass via allow-dangerously flag", allow_dangerously_skip_permissions: true }],
+      ["claude_router_raw", { args: ["--permission-mode", "bypassPermissions", "mcp", "list"] }],
+      ["claude_router_raw", { args: ["--permission-mode=bypassPermissions", "mcp", "list"] }],
+      ["claude_router_raw", { args: ["--dangerously-skip-permissions", "mcp", "list"] }]
+    ];
+    for (const [index, [name, arguments_]] of rejected.entries()) {
+      const blocked = await request(proc, {
+        jsonrpc: "2.0",
+        id: index + 2,
+        method: "tools/call",
+        params: { name, arguments: { cwd: repo, ...arguments_ } }
+      });
+      assert.equal(blocked.error?.code, -32000, JSON.stringify(blocked));
+      assert.match(blocked.error.message, /dangerous permission bypass/i, JSON.stringify(blocked));
+    }
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 0);
+
+    const consentedExec = await request(proc, {
+      jsonrpc: "2.0",
+      id: 20,
+      method: "tools/call",
+      params: {
+        name: "claude_router_exec",
+        arguments: {
+          cwd: repo,
+          prompt: "accepted bypass",
+          allow_dangerous: true,
+          permission_mode: "bypassPermissions"
+        }
+      }
+    });
+    assert.equal(consentedExec.error, undefined, JSON.stringify(consentedExec.error ?? {}));
+    const execPayload = assertHostView(consentedExec.result.content[0].text);
+    const execJob = readStored(data, repo, execPayload.id);
+    assert.equal(execJob.request.permissionMode, "bypassPermissions");
+    const execArgs = execJob.result.args;
+    assert.equal(execArgs[execArgs.indexOf("--permission-mode") + 1], "bypassPermissions");
+
+    const consentedSkip = await request(proc, {
+      jsonrpc: "2.0",
+      id: 21,
+      method: "tools/call",
+      params: {
+        name: "claude_router_exec",
+        arguments: {
+          cwd: repo,
+          prompt: "accepted skip flag",
+          allow_dangerous: true,
+          dangerously_skip_permissions: true
+        }
+      }
+    });
+    assert.equal(consentedSkip.error, undefined, JSON.stringify(consentedSkip.error ?? {}));
+    const skipPayload = assertHostView(consentedSkip.result.content[0].text);
+    const skipJob = readStored(data, repo, skipPayload.id);
+    assert.equal(skipJob.request.permissionMode, "bypassPermissions");
+    const skipArgs = skipJob.result.args;
+    assert.equal(skipArgs[skipArgs.indexOf("--permission-mode") + 1], "bypassPermissions");
+    assert.equal(skipArgs.includes("--dangerously-skip-permissions"), false);
+
+    const consentedRaw = await request(proc, {
+      jsonrpc: "2.0",
+      id: 22,
+      method: "tools/call",
+      params: {
+        name: "claude_router_raw",
+        arguments: {
+          cwd: repo,
+          allow_dangerous: true,
+          args: ["--dangerously-skip-permissions", "mcp", "list"]
+        }
+      }
+    });
+    assert.equal(consentedRaw.error, undefined, JSON.stringify(consentedRaw.error ?? {}));
+    const rawPayload = JSON.parse(consentedRaw.result.content[0].text);
+    assert.equal(rawPayload.status, 0);
+    assert.equal(rawPayload.classification.dangerous, true);
+    assert.deepEqual(rawPayload.classification.commandPath, ["mcp", "list"]);
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 2);
   } finally {
     proc.kill("SIGTERM");
   }

@@ -103,17 +103,6 @@ console.log(JSON.stringify({ args }));
   return fake;
 }
 
-test("setup reports ready with fake claude", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  const result = run("node", [SCRIPT, "setup", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(result.status, 0, result.stderr);
-  const payload = JSON.parse(result.stdout);
-  assert.equal(payload.ready, true);
-  assert.match(payload.claude.detail, /2.1.185/);
-});
-
 test("setup stays ready without reporting plugin or MCP registration", () => {
   const bin = makeTempDir();
   const data = makeTempDir();
@@ -126,6 +115,7 @@ test("setup stays ready without reporting plugin or MCP registration", () => {
   assert.equal(json.status, 0, json.stderr);
   const payload = JSON.parse(json.stdout);
   assert.equal(payload.ready, true);
+  assert.match(payload.claude.detail, /2.1.185/);
   assert.equal(payload.plugins, undefined);
   assert.equal(payload.mcp, undefined);
   assert.equal(payload.coreReady, undefined);

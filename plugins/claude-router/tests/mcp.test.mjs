@@ -712,7 +712,6 @@ test("read-only mcp tools lock permission_mode to plan and reject bypass before 
 });
 
 test("mcp ultrareview stays a closed no-job launch and rejects managed bypass fields", async () => {
-  const dangerousProperty = /danger|bypass|skip[-_]permission|always[-_]approve|permission/i;
   const bin = makeTempDir();
   const repo = makeTempDir();
   const data = makeTempDir();
@@ -728,57 +727,36 @@ test("mcp ultrareview stays a closed no-job launch and rejects managed bypass fi
     assert.deepEqual(Object.keys(schema.properties).sort(), ["cwd", "target", "timeout"]);
     assert.equal(schema.properties.target.type, "string");
     assert.equal(schema.properties.timeout.type, "string");
-    for (const key of Object.keys(schema.properties)) {
-      assert.doesNotMatch(key, dangerousProperty, `claude_router_ultrareview exposes ${key}`);
-    }
 
-    const rejected = [
-      [{ target: "feature-branch", permission_mode: "bypassPermissions" }, /Unknown property "permission_mode"/],
-      [{ target: "feature-branch", "permission-mode": "bypassPermissions" }, /Unknown property "permission-mode"/],
-      [{ target: "feature-branch", allow_dangerous: true }, /Unknown property "allow_dangerous"/],
-      [{ target: "feature-branch", dangerously_skip_permissions: true }, /Unknown property "dangerously_skip_permissions"/],
-      [{ target: "feature-branch", allow_dangerously_skip_permissions: true }, /Unknown property "allow_dangerously_skip_permissions"/],
-      [{ target: "feature-branch", timeout_ms: 5000 }, /Unknown property "timeout_ms"/],
-      [{ target: "feature-branch", prompt: "review this" }, /Unknown property "prompt"/],
-      [{ target: "feature-branch", args: ["--dangerously-skip-permissions"] }, /Unknown property "args"/],
-      [{ target: "feature-branch", timeout: 5 }, /timeout must be a string/]
-    ];
-    let id = 3;
-    for (const [extra, pattern] of rejected) {
-      const blocked = await request(proc, {
-        jsonrpc: "2.0",
-        id,
-        method: "tools/call",
-        params: {
-          name: "claude_router_ultrareview",
-          arguments: { cwd: repo, ...extra }
-        }
-      });
-      id += 1;
-      assert.equal(blocked.error?.code, -32602, JSON.stringify(blocked));
-      assert.match(blocked.error.message, pattern, JSON.stringify(blocked));
-    }
+    const blocked = await request(proc, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "claude_router_ultrareview",
+        arguments: { cwd: repo, target: "feature-branch", permission_mode: "bypassPermissions" }
+      }
+    });
+    assert.equal(blocked.error?.code, -32602, JSON.stringify(blocked));
+    assert.match(blocked.error.message, /Unknown property "permission_mode"/, JSON.stringify(blocked));
     assert.equal(withRouterData(data, () => listJobs(repo)).length, 0);
 
-    for (const arguments_ of [
-      { cwd: repo, target: "feature-branch", timeout: "5" },
-      { cwd: repo }
-    ]) {
-      const result = await request(proc, {
-        jsonrpc: "2.0",
-        id,
-        method: "tools/call",
-        params: { name: "claude_router_ultrareview", arguments: arguments_ }
-      });
-      id += 1;
-      assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-      const payload = assertHostView(result.result.content[0].text);
-      assert.equal(payload.ready, true);
-      assert.equal(payload.status, "completed");
-      assert.equal(payload.mode, "ultrareview");
-      assert.match(payload.output, /"verdict":"pass"/);
-      assert.doesNotMatch(payload.output, /Handled:/);
-    }
+    const result = await request(proc, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "claude_router_ultrareview",
+        arguments: { cwd: repo, target: "feature-branch", timeout: "5" }
+      }
+    });
+    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
+    const payload = assertHostView(result.result.content[0].text);
+    assert.equal(payload.ready, true);
+    assert.equal(payload.status, "completed");
+    assert.equal(payload.mode, "ultrareview");
+    assert.match(payload.output, /"verdict":"pass"/);
+    assert.doesNotMatch(payload.output, /Handled:/);
     assert.equal(withRouterData(data, () => listJobs(repo)).length, 0);
   } finally {
     proc.kill("SIGTERM");

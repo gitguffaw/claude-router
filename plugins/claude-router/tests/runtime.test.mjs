@@ -1318,3 +1318,57 @@ test("foreground non-JSON cancel renders a cancelled terminal message", async ()
     }
   }
 });
+
+test("ultrareview forwards only a PR number or branch target and a numeric timeout to claude", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  const argvFile = path.join(makeTempDir(), "argv.json");
+  const env = { ...buildEnv(bin, data), FAKE_CLAUDE_ARGV_FILE: argvFile };
+  const forwarded = () => (fs.existsSync(argvFile) ? JSON.parse(fs.readFileSync(argvFile, "utf8")) : null);
+
+  const rejected = [
+    ["argv bypass flag as target", ["ultrareview", "--json", "--dangerously-skip-permissions"]],
+    ["argv post flag as target", ["ultrareview", "--json", "--post"]],
+    ["argv equals-form permission mode", ["ultrareview", "--json", "--permission-mode=bypassPermissions"]],
+    ["argv flag after a valid target", ["ultrareview", "--json", "12", "--trust-workspace"]],
+    ["argv non-numeric timeout", ["ultrareview", "--json", "--timeout", "soon", "12"]],
+    ["slash-command raw string", ["ultrareview", "--raw-arg-string", "--post"]]
+  ];
+  for (const [label, argv] of rejected) {
+    fs.rmSync(argvFile, { force: true });
+    const result = run("node", [SCRIPT, ...argv], { cwd: ROOT, env });
+    assert.notEqual(result.status, 0, `${label}: ${result.stdout}`);
+    assert.match(result.stderr, /ultrareview/i, label);
+    assert.equal(forwarded(), null, `${label} must not launch claude`);
+  }
+
+  for (const request of [{ target: "--trust-workspace" }, { target: "-x" }, { timeout: "--post" }]) {
+    fs.rmSync(argvFile, { force: true });
+    const result = run("node", [SCRIPT, "--json-request"], { cwd: ROOT, env, input: JSON.stringify({ command: "ultrareview", ...request }) });
+    assert.notEqual(result.status, 0, JSON.stringify(request));
+    assert.equal(forwarded(), null, `${JSON.stringify(request)} must not launch claude`);
+  }
+
+  const accepted = [
+    [["ultrareview", "--json", "--timeout", "30", "123"], ["ultrareview", "--json", "--timeout", "30", "123"]],
+    [["ultrareview", "--raw-arg-string", "--timeout 30 feature/base"], ["ultrareview", "--json", "--timeout", "30", "feature/base"]],
+    [["ultrareview", "--json"], ["ultrareview", "--json"]]
+  ];
+  for (const [argv, expected] of accepted) {
+    fs.rmSync(argvFile, { force: true });
+    const result = run("node", [SCRIPT, ...argv], { cwd: ROOT, env });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(forwarded(), expected);
+  }
+});
+
+test("ultrareview exits non-zero when claude ultrareview fails", () => {
+  const bin = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  const env = { ...buildEnv(bin, data), FAKE_CLAUDE_ULTRAREVIEW_FAIL: "1" };
+  const result = run("node", [SCRIPT, "ultrareview", "--json", "12"], { cwd: ROOT, env });
+  assert.notEqual(result.status, 0);
+  assert.equal(JSON.parse(result.stdout).jobStatus, "failed");
+});

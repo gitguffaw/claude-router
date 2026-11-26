@@ -6,6 +6,8 @@ All notable changes to Claude Router are documented here.
 
 ### Fixed
 
+- `ultrareview` no longer passes Claude flags through its target. The companion appended any target string to `claude ultrareview`, and unknown options became targets, so an MCP call such as `claude_router_ultrareview {target: "--post"}` could post findings to a PR, trust the workspace, or request permission bypass without `--allow-dangerous`. A target must now be a PR number or base branch (not starting with `-`), `--timeout` must be whole minutes, and extra targets are rejected before Claude starts.
+- `ultrareview` now exits non-zero when `claude ultrareview` fails, like the other managed modes. MCP callers already saw the failed status.
 - Claude Code now starts the plugin's MCP server. The server is declared in `.claude-plugin/plugin.json` with `${CLAUDE_PLUGIN_ROOT}` paths, because Claude Code resolved the relative paths in `.mcp.json` against the session's working directory and the server exited with "Connection closed". `.mcp.json` is unchanged and stays relative for Codex, which resolves it against the plugin root and does not expand `${CLAUDE_PLUGIN_ROOT}`.
 
 ## [2.5.2] — 2026-09-22

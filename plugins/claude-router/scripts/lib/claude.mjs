@@ -309,14 +309,29 @@ export async function runClaudePrintJob(cwd, request, options = {}) {
   };
 }
 
-export async function runClaudeUltrareview(cwd, options = {}) {
+// ultrareview has no raw-args guardrail, so its two inputs are the only things
+// that reach claude. A target that looks like an option would be read by
+// claude as one (--post, --trust-workspace, permission bypass), so only a PR
+// number or base branch is allowed; git branch names cannot start with "-".
+function ultrareviewArgs({ timeout, target }) {
   const args = ["ultrareview", "--json"];
-  if (options.timeout) {
-    args.push("--timeout", String(options.timeout));
+  if (timeout !== undefined && timeout !== null && timeout !== "") {
+    if (!/^\d+$/.test(String(timeout))) {
+      throw new Error(`ultrareview --timeout takes whole minutes; got "${timeout}".`);
+    }
+    args.push("--timeout", String(timeout));
   }
-  if (options.target) {
-    args.push(String(options.target));
+  if (target !== undefined && target !== null && target !== "") {
+    if (String(target).startsWith("-")) {
+      throw new Error(`ultrareview target must be a PR number or base branch, not an option ("${target}"). Claude flags cannot be passed through ultrareview.`);
+    }
+    args.push(String(target));
   }
+  return args;
+}
+
+export async function runClaudeUltrareview(cwd, options = {}) {
+  const args = ultrareviewArgs(options);
   const result = await runProcess("claude", args, { cwd, env: options.env ?? process.env });
   const rawOutput = result.stdout.trim();
   return {

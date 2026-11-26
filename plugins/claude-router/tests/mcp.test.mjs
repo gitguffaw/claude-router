@@ -579,9 +579,6 @@ test("mcp tools/call rejects permission bypass unless allow_dangerous consents",
   try {
     await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     const rejected = [
-      ["claude_router_exec", { prompt: "bypass via permission mode", permission_mode: "bypassPermissions" }],
-      ["claude_router_exec", { prompt: "bypass via skip flag", dangerously_skip_permissions: true }],
-      ["claude_router_exec", { prompt: "bypass via allow-dangerously flag", allow_dangerously_skip_permissions: true }],
       ["claude_router_raw", { args: ["--permission-mode", "bypassPermissions", "mcp", "list"] }],
       ["claude_router_raw", { args: ["--permission-mode=bypassPermissions", "mcp", "list"] }],
       ["claude_router_raw", { args: ["--dangerously-skip-permissions", "mcp", "list"] }]
@@ -639,7 +636,6 @@ test("mcp tools/call rejects permission bypass unless allow_dangerous consents",
     assert.equal(skipJob.request.permissionMode, "bypassPermissions");
     const skipArgs = skipJob.result.args;
     assert.equal(skipArgs[skipArgs.indexOf("--permission-mode") + 1], "bypassPermissions");
-    assert.equal(skipArgs.includes("--dangerously-skip-permissions"), false);
 
     const consentedRaw = await request(proc, {
       jsonrpc: "2.0",

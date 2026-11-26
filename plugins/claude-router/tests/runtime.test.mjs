@@ -1454,13 +1454,44 @@ test("ultrareview forwards only a PR number or branch target and a numeric timeo
   const accepted = [
     [["ultrareview", "--json", "--timeout", "30", "123"], ["ultrareview", "--json", "--timeout", "30", "123"]],
     [["ultrareview", "--raw-arg-string", "--timeout 30 feature/base"], ["ultrareview", "--json", "--timeout", "30", "feature/base"]],
-    [["ultrareview", "--json"], ["ultrareview", "--json"]]
+    [["ultrareview", "--raw-arg-string", "--json --timeout 5 feature-branch"], ["ultrareview", "--json", "--timeout", "5", "feature-branch"]],
+    [["ultrareview", "--json"], ["ultrareview", "--json"]],
+    [["ultrareview", "--json", "--timeout", "0"], ["ultrareview", "--json", "--timeout", "0"]]
   ];
   for (const [argv, expected] of accepted) {
     fs.rmSync(argvFile, { force: true });
     const result = run("node", [SCRIPT, ...argv], { cwd: ROOT, env });
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(forwarded(), expected);
+  }
+
+  fs.rmSync(argvFile, { force: true });
+  const jsonLaunch = run("node", [SCRIPT, "--json-request"], {
+    cwd: ROOT,
+    env,
+    input: `${JSON.stringify({ command: "ultrareview", target: "feature-branch", timeout: "5", cwd: ROOT })}\n`
+  });
+  assert.equal(jsonLaunch.status, 0, jsonLaunch.stderr);
+  assert.deepEqual(forwarded(), ["ultrareview", "--json", "--timeout", "5", "feature-branch"]);
+  const payload = JSON.parse(jsonLaunch.stdout);
+  assert.equal(payload.exitStatus, 0);
+  assert.equal(payload.jobStatus, "completed");
+  assert.equal(payload.payload.mode, "ultrareview");
+  assert.equal(payload.payload.command, "claude");
+  assert.deepEqual(payload.payload.args, ["ultrareview", "--json", "--timeout", "5", "feature-branch"]);
+  assert.deepEqual(payload.payload.parsedOutput, { verdict: "pass", findings: [] });
+  assert.match(payload.rendered, /Claude Ultrareview/);
+
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = data;
+  try {
+    assert.equal(listJobs(ROOT).length, 0);
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
   }
 });
 
@@ -1472,66 +1503,4 @@ test("ultrareview exits non-zero when claude ultrareview fails", () => {
   const result = run("node", [SCRIPT, "ultrareview", "--json", "12"], { cwd: ROOT, env });
   assert.notEqual(result.status, 0);
   assert.equal(JSON.parse(result.stdout).jobStatus, "failed");
-});
-
-test("ultrareview launches claude ultrareview --json with timeout and target and stores no job", () => {
-  const repo = makeTempDir();
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  initGitRepo(repo);
-  const env = buildEnv(bin, data);
-  const withTimeout = ["ultrareview", "--json", "--timeout", "5", "feature-branch"];
-  const invocations = [
-    {
-      label: "slash-command blob",
-      args: ["ultrareview", "--raw-arg-string", "--json --timeout 5 feature-branch"],
-      expected: withTimeout
-    },
-    {
-      label: "json request",
-      args: ["--json-request"],
-      input: `${JSON.stringify({ command: "ultrareview", target: "feature-branch", timeout: "5", cwd: repo })}\n`,
-      expected: withTimeout
-    },
-    {
-      label: "bare",
-      args: ["ultrareview", "--json"],
-      expected: ["ultrareview", "--json"]
-    },
-    {
-      label: "timeout zero",
-      args: ["ultrareview", "--json", "--timeout", "0"],
-      expected: ["ultrareview", "--json", "--timeout", "0"]
-    }
-  ];
-
-  for (const invocation of invocations) {
-    const result = run("node", [SCRIPT, ...invocation.args], {
-      cwd: repo,
-      env,
-      input: invocation.input
-    });
-    assert.equal(result.status, 0, `${invocation.label}: ${result.stderr}`);
-    const payload = JSON.parse(result.stdout);
-    assert.equal(payload.exitStatus, 0, invocation.label);
-    assert.equal(payload.jobStatus, "completed", invocation.label);
-    assert.equal(payload.payload.mode, "ultrareview", invocation.label);
-    assert.equal(payload.payload.command, "claude", invocation.label);
-    assert.deepEqual(payload.payload.args, invocation.expected, invocation.label);
-    assert.deepEqual(payload.payload.parsedOutput, { verdict: "pass", findings: [] }, invocation.label);
-    assert.match(payload.rendered, /Claude Ultrareview/, invocation.label);
-  }
-
-  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
-  process.env.CLAUDE_ROUTER_DATA = data;
-  try {
-    assert.equal(listJobs(repo).length, 0);
-  } finally {
-    if (previousDataDir === undefined) {
-      delete process.env.CLAUDE_ROUTER_DATA;
-    } else {
-      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
-    }
-  }
 });

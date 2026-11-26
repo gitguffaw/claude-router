@@ -198,138 +198,89 @@ test("models command refuses stale static mode", () => {
   assert.match(result.stderr, /always reads the installed Claude CLI/);
 });
 
-test("raw claude command can read help and blocks mutating commands by default", () => {
+test("raw guardrails classify argv as ok, mutating, or dangerous", () => {
   const bin = makeTempDir();
   const data = makeTempDir();
   installFakeClaude(bin);
-  const help = run("node", [SCRIPT, "raw", "--json", "--", "mcp", "add", "--help"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(help.status, 0, help.stderr);
-  assert.match(JSON.parse(help.stdout).stdout, /Usage: claude/);
+  const cases = [
+    { argv: ["mcp", "add", "--help"], expected: "ok", stdout: /Usage: claude/ },
+    { argv: ["mcp", "add", "example", "node"], expected: "mutating" },
+    { argv: ["plugins", "install", "example"], expected: "mutating" },
+    { argv: ["mcp", "login", "example"], expected: "mutating" },
+    { argv: ["rm", "--help"], expected: "ok" },
+    { argv: ["rm", "some-id"], expected: "mutating" },
+    { argv: ["stop", "some-id"], expected: "mutating" },
+    { argv: ["respawn", "some-id"], expected: "mutating" },
+    {
+      argv: ["rm", "some-id"],
+      override: ["--allow-mutating"],
+      expected: "ok",
+      classification: { mutating: true, commandPath: ["rm"] }
+    },
+    { argv: ["--model", "opus", "mcp", "add", "example", "node"], expected: "mutating" },
+    { argv: ["--permission-mode", "plan", "mcp", "remove", "example"], expected: "mutating" },
+    { argv: ["mcp", "add", "help", "node"], expected: "mutating" },
+    { argv: ["plugin", "install", "help"], expected: "mutating" },
+    { argv: ["project", "purge", "--dry-run=false"], expected: "mutating" },
+    { argv: ["mcp", "add", "example", "node", "--help=false"], expected: "mutating" },
+    { argv: ["--exclude-dynamic-system-prompt-sections", "mcp", "remove", "example"], expected: "mutating" },
+    { argv: ["--tmux", "mcp", "remove", "example"], expected: "mutating" },
+    { argv: ["--tmux=classic", "mcp", "remove", "example"], expected: "mutating" },
+    { argv: ["--dangerously-skip-permissions", "mcp", "list"], expected: "dangerous" },
+    { argv: ["--allow-dangerously-skip-permissions", "mcp", "list"], expected: "dangerous" },
+    { argv: ["--bypass-permissions", "mcp", "list"], expected: "dangerous" },
+    { argv: ["--permission-mode=bypassPermissions", "mcp", "list"], expected: "dangerous" },
+    {
+      argv: ["--exclude-dynamic-system-prompt-sections", "--permission-mode", "bypassPermissions", "mcp", "list"],
+      expected: "dangerous"
+    },
+    { argv: ["--tmux", "--permission-mode", "bypassPermissions", "mcp", "list"], expected: "dangerous" },
+    { argv: ["--tmux=classic", "--permission-mode", "bypassPermissions", "mcp", "list"], expected: "dangerous" },
+    {
+      argv: ["--exclude-dynamic-system-prompt-sections", "--permission-mode", "bypassPermissions", "mcp", "list"],
+      override: ["--allow-dangerous"],
+      expected: "ok",
+      classification: { dangerous: true, commandPath: ["mcp", "list"] }
+    },
+    { argv: ["mcp", "list"], expected: "ok" },
+    { argv: ["--exclude-dynamic-system-prompt-sections", "mcp", "list"], expected: "ok" },
+    { argv: ["--tmux", "mcp", "list"], expected: "ok" },
+    { argv: ["--tmux=classic", "mcp", "list"], expected: "ok" }
+  ];
 
-  const blocked = run("node", [SCRIPT, "raw", "--json", "--", "mcp", "add", "example", "node"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.notEqual(blocked.status, 0);
-  assert.match(blocked.stderr, /may mutate/);
-
-  const blockedAlias = run("node", [SCRIPT, "raw", "--json", "--", "plugins", "install", "example"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.notEqual(blockedAlias.status, 0);
-  assert.match(blockedAlias.stderr, /may mutate/);
-
-  const blockedMcpLogin = run("node", [SCRIPT, "raw", "--json", "--", "mcp", "login", "example"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.notEqual(blockedMcpLogin.status, 0);
-  assert.match(blockedMcpLogin.stderr, /may mutate/);
-});
-
-test("raw guardrails block top-level rm session deletion unless allow-mutating", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-
-  const help = run("node", [SCRIPT, "raw", "--json", "--", "rm", "--help"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(help.status, 0, help.stderr);
-
-  for (const command of ["rm", "stop", "respawn"]) {
-    const blocked = run("node", [SCRIPT, "raw", "--json", "--", command, "some-id"], { cwd: ROOT, env: buildEnv(bin, data) });
-    assert.notEqual(blocked.status, 0, `${command} should fail`);
-    assert.match(blocked.stderr, /may mutate/);
-  }
-
-  const allowed = run("node", [
-    SCRIPT,
-    "raw",
-    "--json",
-    "--allow-mutating",
-    "--",
-    "rm",
-    "some-id"
-  ], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(allowed.status, 0, allowed.stderr);
-  const allowedPayload = JSON.parse(allowed.stdout);
-  assert.equal(allowedPayload.classification.mutating, true);
-  assert.deepEqual(allowedPayload.classification.commandPath, ["rm"]);
-});
-
-test("raw guardrails classify command paths after global flags and do not trust literal help args", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  for (const args of [
-    ["raw", "--json", "--", "--model", "opus", "mcp", "add", "example", "node"],
-    ["raw", "--json", "--", "--permission-mode", "plan", "mcp", "remove", "example"],
-    ["raw", "--json", "--", "mcp", "add", "help", "node"],
-    ["raw", "--json", "--", "plugin", "install", "help"],
-    ["raw", "--json", "--", "project", "purge", "--dry-run=false"],
-    ["raw", "--json", "--", "mcp", "add", "example", "node", "--help=false"]
-  ]) {
-    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
-    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
-    assert.match(blocked.stderr, /may mutate/);
-  }
-});
-
-test("raw guardrails do not let Claude boolean prefixes hide mutating mcp commands", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  for (const args of [
-    ["raw", "--json", "--", "--exclude-dynamic-system-prompt-sections", "mcp", "remove", "example"],
-    ["raw", "--json", "--", "--tmux", "mcp", "remove", "example"],
-    ["raw", "--json", "--", "--tmux=classic", "mcp", "remove", "example"]
-  ]) {
-    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
-    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
-    assert.match(blocked.stderr, /may mutate/);
-  }
-});
-
-test("raw guardrails do not let Claude boolean prefixes hide dangerous permission-mode", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  for (const args of [
-    ["raw", "--json", "--", "--dangerously-skip-permissions", "mcp", "list"],
-    ["raw", "--json", "--", "--allow-dangerously-skip-permissions", "mcp", "list"],
-    ["raw", "--json", "--", "--bypass-permissions", "mcp", "list"],
-    ["raw", "--json", "--", "--permission-mode=bypassPermissions", "mcp", "list"],
-    ["raw", "--json", "--", "--exclude-dynamic-system-prompt-sections", "--permission-mode", "bypassPermissions", "mcp", "list"],
-    ["raw", "--json", "--", "--tmux", "--permission-mode", "bypassPermissions", "mcp", "list"],
-    ["raw", "--json", "--", "--tmux=classic", "--permission-mode", "bypassPermissions", "mcp", "list"]
-  ]) {
-    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
-    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
-    assert.match(blocked.stderr, /dangerous permission bypass/i);
-  }
-
-  const allowed = run("node", [
-    SCRIPT,
-    "raw",
-    "--json",
-    "--allow-dangerous",
-    "--",
-    "--exclude-dynamic-system-prompt-sections",
-    "--permission-mode",
-    "bypassPermissions",
-    "mcp",
-    "list"
-  ], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(allowed.status, 0, allowed.stderr);
-  const allowedPayload = JSON.parse(allowed.stdout);
-  assert.equal(allowedPayload.classification.dangerous, true);
-  assert.deepEqual(allowedPayload.classification.commandPath, ["mcp", "list"]);
-});
-
-test("raw read-only invocations still work with Claude boolean prefixes", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  for (const args of [
-    ["raw", "--json", "--", "mcp", "list"],
-    ["raw", "--json", "--", "--exclude-dynamic-system-prompt-sections", "mcp", "list"],
-    ["raw", "--json", "--", "--tmux", "mcp", "list"],
-    ["raw", "--json", "--", "--tmux=classic", "mcp", "list"],
-    ["raw", "--json", "--", "mcp", "add", "--help"]
-  ]) {
-    const result = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
-    assert.equal(result.status, 0, `${args.join(" ")} should succeed: ${result.stderr}`);
+  for (const row of cases) {
+    const override = row.override ?? [];
+    const label = [...override, ...row.argv].join(" ");
+    const result = run("node", [SCRIPT, "raw", "--json", ...override, "--", ...row.argv], {
+      cwd: ROOT,
+      env: buildEnv(bin, data)
+    });
+    if (row.expected === "ok") {
+      assert.equal(result.status, 0, `${label} should succeed: ${result.stderr}`);
+      if (row.stdout || row.classification) {
+        const payload = JSON.parse(result.stdout);
+        if (row.stdout) {
+          assert.match(payload.stdout, row.stdout);
+        }
+        if (row.classification?.mutating !== undefined) {
+          assert.equal(payload.classification.mutating, row.classification.mutating);
+        }
+        if (row.classification?.dangerous !== undefined) {
+          assert.equal(payload.classification.dangerous, row.classification.dangerous);
+        }
+        if (row.classification) {
+          assert.deepEqual(payload.classification.commandPath, row.classification.commandPath);
+        }
+      }
+    } else if (row.expected === "mutating") {
+      assert.notEqual(result.status, 0, `${label} should fail`);
+      assert.match(result.stderr, /may mutate/);
+    } else if (row.expected === "dangerous") {
+      assert.notEqual(result.status, 0, `${label} should fail`);
+      assert.match(result.stderr, /dangerous permission bypass/i);
+    } else {
+      assert.fail(`unknown expected ${row.expected} for ${label}`);
+    }
   }
 });
 

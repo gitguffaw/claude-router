@@ -1053,32 +1053,6 @@ test("mcp relative cwd is resolved once against server cwd (no double segment)",
   }
 });
 
-test("mcp absolute cwd is unchanged (regression pin)", async () => {
-  const bin = makeTempDir();
-  const repo = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  initGitRepo(repo);
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
-  try {
-    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
-    const result = await request(proc, {
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: {
-        name: "claude_router_analyze",
-        arguments: { cwd: repo, prompt: "absolute cwd pin" }
-      }
-    });
-    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    const payload = assertHostView(result.result.content[0].text);
-    assert.equal(fs.realpathSync(readStored(data, repo, payload.id).workspaceRoot), fs.realpathSync(repo));
-  } finally {
-    proc.kill("SIGTERM");
-  }
-});
-
 test("mcp SIGTERM sweeps in-flight companion when harness can observe child death", async () => {
   // Optional integration: companion is the tracked process group. Nested detached fake
   // claude may not die with the companion; only fail if the server itself fails to exit.

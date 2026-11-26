@@ -593,8 +593,14 @@ async function handleUltrareview(argv) {
 async function runUltrareview({ options, positionals }) {
   const cwd = resolveCwd(options);
   const workspaceRoot = resolveWorkspaceRoot(cwd);
+  // parseArgs turns unknown options into positionals, so anything past one
+  // target is either a typo or an attempt to pass a flag through.
+  if (positionals.length > 1) {
+    throw new Error(`ultrareview takes at most one target (a PR number or base branch); got: ${positionals.join(" ")}`);
+  }
   const result = await runClaudeUltrareview(workspaceRoot, { timeout: options.timeout, target: positionals[0] });
   output(options.json ? result : result.rendered, Boolean(options.json));
+  applyManagedJobExit(result);
 }
 
 async function handleModels(argv) {

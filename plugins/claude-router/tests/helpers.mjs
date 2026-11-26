@@ -51,6 +51,13 @@ if (args[0] === "mcp" && args[1] === "list") {
   process.exit(0);
 }
 if (args[0] === "ultrareview") {
+  if (process.env.FAKE_CLAUDE_ARGV_FILE) {
+    fs.writeFileSync(process.env.FAKE_CLAUDE_ARGV_FILE, JSON.stringify(args));
+  }
+  if (process.env.FAKE_CLAUDE_ULTRAREVIEW_FAIL === "1") {
+    console.error("Not logged in");
+    process.exit(1);
+  }
   console.log(JSON.stringify({ verdict: "pass", findings: [] }));
   process.exit(0);
 }

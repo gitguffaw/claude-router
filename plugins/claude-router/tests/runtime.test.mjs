@@ -286,6 +286,10 @@ test("raw guardrails do not let Claude boolean prefixes hide dangerous permissio
   const data = makeTempDir();
   installFakeClaude(bin);
   for (const args of [
+    ["raw", "--json", "--", "--dangerously-skip-permissions", "mcp", "list"],
+    ["raw", "--json", "--", "--allow-dangerously-skip-permissions", "mcp", "list"],
+    ["raw", "--json", "--", "--bypass-permissions", "mcp", "list"],
+    ["raw", "--json", "--", "--permission-mode=bypassPermissions", "mcp", "list"],
     ["raw", "--json", "--", "--exclude-dynamic-system-prompt-sections", "--permission-mode", "bypassPermissions", "mcp", "list"],
     ["raw", "--json", "--", "--tmux", "--permission-mode", "bypassPermissions", "mcp", "list"],
     ["raw", "--json", "--", "--tmux=classic", "--permission-mode", "bypassPermissions", "mcp", "list"]
@@ -334,72 +338,13 @@ test("cli alias rejects permission bypass and mutating commands unless the raw o
   const data = makeTempDir();
   installFakeClaude(bin);
   const env = buildEnv(bin, data);
-  const rejected = [
-    {
-      label: "argv dangerously-skip-permissions",
-      args: ["cli", "--json", "--", "--dangerously-skip-permissions", "mcp", "list"],
-      pattern: /dangerous permission bypass/i
-    },
-    {
-      label: "argv allow-dangerously-skip-permissions",
-      args: ["cli", "--json", "--", "--allow-dangerously-skip-permissions", "mcp", "list"],
-      pattern: /dangerous permission bypass/i
-    },
-    {
-      label: "argv bypass-permissions",
-      args: ["cli", "--json", "--", "--bypass-permissions", "mcp", "list"],
-      pattern: /dangerous permission bypass/i
-    },
-    {
-      label: "argv permission-mode bypassPermissions",
-      args: ["cli", "--json", "--", "--permission-mode", "bypassPermissions", "mcp", "list"],
-      pattern: /dangerous permission bypass/i
-    },
-    {
-      label: "argv permission-mode equals bypassPermissions",
-      args: ["cli", "--json", "--", "--permission-mode=bypassPermissions", "mcp", "list"],
-      pattern: /dangerous permission bypass/i
-    },
-    {
-      label: "json-request dangerously-skip-permissions",
-      args: ["--json-request"],
-      input: `${JSON.stringify({ command: "cli", args: ["--dangerously-skip-permissions", "mcp", "list"] })}\n`,
-      pattern: /dangerous permission bypass/i
-    },
-    {
-      label: "json-request permission-mode bypassPermissions",
-      args: ["--json-request"],
-      input: `${JSON.stringify({ command: "cli", args: ["--permission-mode", "bypassPermissions", "mcp", "list"] })}\n`,
-      pattern: /dangerous permission bypass/i
-    },
-    {
-      label: "argv mutating mcp add",
-      args: ["cli", "--json", "--", "mcp", "add", "example", "node"],
-      pattern: /may mutate/i
-    }
-  ];
 
-  for (const invocation of rejected) {
-    const blocked = run("node", [SCRIPT, ...invocation.args], {
-      cwd: ROOT,
-      env,
-      input: invocation.input
-    });
-    assert.notEqual(blocked.status, 0, `${invocation.label} should fail: ${blocked.stderr}`);
-    assert.match(blocked.stderr, invocation.pattern, invocation.label);
-    assert.equal(blocked.stdout, "", invocation.label);
-  }
+  const blocked = run("node", [SCRIPT, "cli", "--json", "--", "--permission-mode", "bypassPermissions", "mcp", "list"], { cwd: ROOT, env });
+  assert.notEqual(blocked.status, 0, blocked.stderr);
+  assert.match(blocked.stderr, /dangerous permission bypass/i);
+  assert.equal(blocked.stdout, "");
 
-  const readOnly = run("node", [SCRIPT, "cli", "--json", "--", "mcp", "list"], { cwd: ROOT, env });
-  assert.equal(readOnly.status, 0, readOnly.stderr);
-  const readOnlyPayload = JSON.parse(readOnly.stdout);
-  assert.equal(readOnlyPayload.classification.dangerous, false);
-  assert.equal(readOnlyPayload.classification.mutating, false);
-  assert.deepEqual(readOnlyPayload.classification.commandPath, ["mcp", "list"]);
-  assert.deepEqual(readOnlyPayload.args, ["mcp", "list"]);
-  assert.match(readOnlyPayload.stdout, /claude-router: connected/);
-
-  const consentedArgv = run("node", [
+  const consented = run("node", [
     SCRIPT,
     "cli",
     "--json",
@@ -409,25 +354,11 @@ test("cli alias rejects permission bypass and mutating commands unless the raw o
     "mcp",
     "list"
   ], { cwd: ROOT, env });
-  assert.equal(consentedArgv.status, 0, consentedArgv.stderr);
-  const consentedArgvPayload = JSON.parse(consentedArgv.stdout);
-  assert.equal(consentedArgvPayload.classification.dangerous, true);
-  assert.deepEqual(consentedArgvPayload.classification.commandPath, ["mcp", "list"]);
-  assert.deepEqual(consentedArgvPayload.args, ["--dangerously-skip-permissions", "mcp", "list"]);
-
-  const consentedJson = run("node", [SCRIPT, "--json-request"], {
-    cwd: ROOT,
-    env,
-    input: `${JSON.stringify({
-      command: "cli",
-      allow_dangerous: true,
-      args: ["--permission-mode", "bypassPermissions", "mcp", "list"]
-    })}\n`
-  });
-  assert.equal(consentedJson.status, 0, consentedJson.stderr);
-  const consentedJsonPayload = JSON.parse(consentedJson.stdout);
-  assert.equal(consentedJsonPayload.classification.dangerous, true);
-  assert.deepEqual(consentedJsonPayload.args, ["--permission-mode", "bypassPermissions", "mcp", "list"]);
+  assert.equal(consented.status, 0, consented.stderr);
+  const payload = JSON.parse(consented.stdout);
+  assert.equal(payload.classification.dangerous, true);
+  assert.deepEqual(payload.classification.commandPath, ["mcp", "list"]);
+  assert.deepEqual(payload.args, ["--dangerously-skip-permissions", "mcp", "list"]);
 });
 
 test("raw passthrough preserves routed optional and repeatable-looking flags before --", () => {

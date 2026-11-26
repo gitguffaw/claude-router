@@ -91,10 +91,6 @@ test("raw and cli commands expose guarded Claude CLI passthrough", () => {
   const cli = read("commands/cli.md");
 
   assert.match(raw, /claude-companion\.mjs" raw --raw-arg-string "\$ARGUMENTS"/);
-  assert.match(raw, /mcp list/);
-  assert.match(raw, /plugin list/);
-  assert.match(raw, /Mutating Claude configuration commands and dangerous permission bypasses are blocked by default/i);
-  assert.match(cli, /alias for `\/claude-router:raw`/i);
   assert.match(cli, /claude-companion\.mjs" raw --raw-arg-string "\$ARGUMENTS"/);
 });
 

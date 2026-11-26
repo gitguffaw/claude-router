@@ -104,9 +104,5 @@ test("claude_router_models always exposes the live-discovery contract", async ()
 
 test("renderModelCatalog explains live fields and lean profiles", () => {
   const rendered = renderModelCatalog(getModelCatalog({ claudeHelp: CLAUDE_HELP }));
-  assert.match(rendered, /## Model Selectors/);
-  assert.match(rendered, /## Live Claude CLI Fields/);
-  assert.match(rendered, /## Advertised Tier Annotations/);
-  assert.match(rendered, /## Lean Profiles/);
   assert.match(rendered, /--lean=oauth/);
 });

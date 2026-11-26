@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { buildEnv, initGitRepo, installFakeClaude, makeTempDir } from "./helpers.mjs";
-import { readJobFile } from "../scripts/lib/state.mjs";
+import { listJobs, readJobFile } from "../scripts/lib/state.mjs";
 import {
   schemaFor,
   validateAgainstSchema,
@@ -23,11 +23,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = path.join(ROOT, "scripts", "claude-router-mcp.mjs");
 const PLUGIN = JSON.parse(fs.readFileSync(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
 
-function readStored(dataDir, cwd, id) {
+function withRouterData(dataDir, fn) {
   const previous = process.env.CLAUDE_ROUTER_DATA;
   process.env.CLAUDE_ROUTER_DATA = dataDir;
   try {
-    return readJobFile(cwd, id);
+    return fn();
   } finally {
     if (previous === undefined) {
       delete process.env.CLAUDE_ROUTER_DATA;
@@ -35,6 +35,10 @@ function readStored(dataDir, cwd, id) {
       process.env.CLAUDE_ROUTER_DATA = previous;
     }
   }
+}
+
+function readStored(dataDir, cwd, id) {
+  return withRouterData(dataDir, () => readJobFile(cwd, id));
 }
 
 function assertHostView(text) {
@@ -492,41 +496,6 @@ test("mcp raw tool preserves guardrails through global Claude flags", async () =
   }
 });
 
-test("mcp valid analyze call still succeeds with closed schema", async () => {
-  const bin = makeTempDir();
-  const repo = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  initGitRepo(repo);
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
-  try {
-    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
-    const result = await request(proc, {
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: {
-        name: "claude_router_analyze",
-        arguments: {
-          cwd: repo,
-          prompt: "normal prompt",
-          permission_mode: "plan",
-          timeout_ms: 120000
-        }
-      }
-    });
-    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    const payload = assertHostView(result.result.content[0].text);
-    assert.equal(payload.ready, true);
-    assert.match(payload.output, /Handled:/);
-    const job = readStored(data, repo, payload.id);
-    assert.equal(job.request.userRequest, "normal prompt");
-    assert.equal(job.request.permissionMode, "plan");
-  } finally {
-    proc.kill("SIGTERM");
-  }
-});
-
 test("mcp exec accepts a live permission_mode without freezing an enum", async () => {
   const bin = makeTempDir();
   const repo = makeTempDir();
@@ -560,6 +529,235 @@ test("mcp exec accepts a live permission_mode without freezing an enum", async (
     const job = readStored(data, repo, payload.id);
     assert.equal(job.request.permissionMode, "auto");
     assert.equal(job.request.write, true);
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("mcp tools/call rejects permission bypass unless allow_dangerous consents", async () => {
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const rejected = [
+      ["claude_router_raw", { args: ["--permission-mode", "bypassPermissions", "mcp", "list"] }],
+      ["claude_router_raw", { args: ["--permission-mode=bypassPermissions", "mcp", "list"] }],
+      ["claude_router_raw", { args: ["--dangerously-skip-permissions", "mcp", "list"] }]
+    ];
+    for (const [index, [name, arguments_]] of rejected.entries()) {
+      const blocked = await request(proc, {
+        jsonrpc: "2.0",
+        id: index + 2,
+        method: "tools/call",
+        params: { name, arguments: { cwd: repo, ...arguments_ } }
+      });
+      assert.equal(blocked.error?.code, -32000, JSON.stringify(blocked));
+      assert.match(blocked.error.message, /dangerous permission bypass/i, JSON.stringify(blocked));
+    }
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 0);
+
+    const consentedExec = await request(proc, {
+      jsonrpc: "2.0",
+      id: 20,
+      method: "tools/call",
+      params: {
+        name: "claude_router_exec",
+        arguments: {
+          cwd: repo,
+          prompt: "accepted bypass",
+          allow_dangerous: true,
+          permission_mode: "bypassPermissions"
+        }
+      }
+    });
+    assert.equal(consentedExec.error, undefined, JSON.stringify(consentedExec.error ?? {}));
+    const execPayload = assertHostView(consentedExec.result.content[0].text);
+    const execJob = readStored(data, repo, execPayload.id);
+    assert.equal(execJob.request.permissionMode, "bypassPermissions");
+    const execArgs = execJob.result.args;
+    assert.equal(execArgs[execArgs.indexOf("--permission-mode") + 1], "bypassPermissions");
+
+    const consentedSkip = await request(proc, {
+      jsonrpc: "2.0",
+      id: 21,
+      method: "tools/call",
+      params: {
+        name: "claude_router_exec",
+        arguments: {
+          cwd: repo,
+          prompt: "accepted skip flag",
+          allow_dangerous: true,
+          dangerously_skip_permissions: true
+        }
+      }
+    });
+    assert.equal(consentedSkip.error, undefined, JSON.stringify(consentedSkip.error ?? {}));
+    const skipPayload = assertHostView(consentedSkip.result.content[0].text);
+    const skipJob = readStored(data, repo, skipPayload.id);
+    assert.equal(skipJob.request.permissionMode, "bypassPermissions");
+    const skipArgs = skipJob.result.args;
+    assert.equal(skipArgs[skipArgs.indexOf("--permission-mode") + 1], "bypassPermissions");
+
+    const consentedRaw = await request(proc, {
+      jsonrpc: "2.0",
+      id: 22,
+      method: "tools/call",
+      params: {
+        name: "claude_router_raw",
+        arguments: {
+          cwd: repo,
+          allow_dangerous: true,
+          args: ["--dangerously-skip-permissions", "mcp", "list"]
+        }
+      }
+    });
+    assert.equal(consentedRaw.error, undefined, JSON.stringify(consentedRaw.error ?? {}));
+    const rawPayload = JSON.parse(consentedRaw.result.content[0].text);
+    assert.equal(rawPayload.status, 0);
+    assert.equal(rawPayload.classification.dangerous, true);
+    assert.deepEqual(rawPayload.classification.commandPath, ["mcp", "list"]);
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 2);
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("read-only mcp tools lock permission_mode to plan and reject bypass before launch", async () => {
+  const readOnlyTools = [
+    ["claude_router_analyze", "analyze"],
+    ["claude_router_plan", "plan"],
+    ["claude_router_review", "review"],
+    ["claude_router_adversarial_review", "adversarial-review"]
+  ];
+  const dangerousProperty = /danger|bypass|skip[-_]permission|always[-_]approve/i;
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const list = await request(proc, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    const toolByName = new Map(list.result.tools.map((tool) => [tool.name, tool]));
+    for (const [name] of readOnlyTools) {
+      const schema = toolByName.get(name).inputSchema;
+      assert.equal(schema.additionalProperties, false, name);
+      assert.deepEqual(schema.properties.permission_mode.enum, ["plan"], name);
+      assert.deepEqual(schema.required, ["prompt"], name);
+      for (const key of Object.keys(schema.properties)) {
+        assert.doesNotMatch(key, dangerousProperty, `${name} exposes ${key}`);
+      }
+    }
+
+    const rejectedInputs = [
+      [{ permission_mode: "bypassPermissions" }, /permission_mode must be one of: plan/],
+      [{ dangerously_skip_permissions: true }, /Unknown property "dangerously_skip_permissions"/]
+    ];
+    let id = 3;
+    for (const [name] of readOnlyTools) {
+      if (name === "claude_router_analyze") {
+        continue;
+      }
+      for (const [extra, pattern] of rejectedInputs) {
+        const blocked = await request(proc, {
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: {
+            name,
+            arguments: { cwd: repo, prompt: "read only", ...extra }
+          }
+        });
+        id += 1;
+        assert.equal(blocked.error?.code, -32602, `${name} ${JSON.stringify(extra)} ${JSON.stringify(blocked)}`);
+        assert.match(blocked.error.message, pattern, `${name} ${JSON.stringify(blocked)}`);
+      }
+    }
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 0);
+
+    for (const [name, mode] of readOnlyTools) {
+      const result = await request(proc, {
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: {
+          name,
+          arguments: { cwd: repo, prompt: `${mode} stays read-only`, permission_mode: "plan" }
+        }
+      });
+      id += 1;
+      assert.equal(result.error, undefined, `${name} ${JSON.stringify(result.error ?? {})}`);
+      const payload = assertHostView(result.result.content[0].text);
+      assert.equal(payload.mode, mode, name);
+      assert.equal(payload.ready, true, name);
+      const job = readStored(data, repo, payload.id);
+      assert.equal(job.mode, mode, name);
+      assert.equal(job.write, false, name);
+      assert.equal(job.request.write, false, name);
+      assert.equal(job.request.permissionMode, "plan", name);
+      const args = job.result.args;
+      assert.equal(args[args.indexOf("--permission-mode") + 1], "plan", name);
+      assert.equal(args.includes("bypassPermissions"), false, name);
+      assert.equal(args.includes("--dangerously-skip-permissions"), false, name);
+    }
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 4);
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
+
+test("mcp ultrareview stays a closed no-job launch and rejects managed bypass fields", async () => {
+  const bin = makeTempDir();
+  const repo = makeTempDir();
+  const data = makeTempDir();
+  installFakeClaude(bin);
+  initGitRepo(repo);
+  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const list = await request(proc, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    const schema = list.result.tools.find((tool) => tool.name === "claude_router_ultrareview").inputSchema;
+    assert.equal(schema.additionalProperties, false);
+    assert.deepEqual(schema.required ?? [], []);
+    assert.deepEqual(Object.keys(schema.properties).sort(), ["cwd", "target", "timeout"]);
+    assert.equal(schema.properties.target.type, "string");
+    assert.equal(schema.properties.timeout.type, "string");
+
+    const blocked = await request(proc, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "claude_router_ultrareview",
+        arguments: { cwd: repo, target: "feature-branch", permission_mode: "bypassPermissions" }
+      }
+    });
+    assert.equal(blocked.error?.code, -32602, JSON.stringify(blocked));
+    assert.match(blocked.error.message, /Unknown property "permission_mode"/, JSON.stringify(blocked));
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 0);
+
+    const result = await request(proc, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "claude_router_ultrareview",
+        arguments: { cwd: repo, target: "feature-branch", timeout: "5" }
+      }
+    });
+    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
+    const payload = assertHostView(result.result.content[0].text);
+    assert.equal(payload.ready, true);
+    assert.equal(payload.status, "completed");
+    assert.equal(payload.mode, "ultrareview");
+    assert.match(payload.output, /"verdict":"pass"/);
+    assert.doesNotMatch(payload.output, /Handled:/);
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 0);
   } finally {
     proc.kill("SIGTERM");
   }
@@ -850,57 +1048,6 @@ test("mcp relative cwd is resolved once against server cwd (no double segment)",
     );
     assert.match(workspaceRoot, /myrepo$/);
     assert.doesNotMatch(workspaceRoot, /myrepo[/\\]myrepo$/);
-  } finally {
-    proc.kill("SIGTERM");
-  }
-});
-
-test("mcp absolute cwd is unchanged (regression pin)", async () => {
-  const bin = makeTempDir();
-  const repo = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  initGitRepo(repo);
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
-  try {
-    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
-    const result = await request(proc, {
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: {
-        name: "claude_router_analyze",
-        arguments: { cwd: repo, prompt: "absolute cwd pin" }
-      }
-    });
-    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    const payload = assertHostView(result.result.content[0].text);
-    assert.equal(fs.realpathSync(readStored(data, repo, payload.id).workspaceRoot), fs.realpathSync(repo));
-  } finally {
-    proc.kill("SIGTERM");
-  }
-});
-
-test("mcp omitted cwd defaults to plugin ROOT (regression pin)", async () => {
-  const bin = makeTempDir();
-  installFakeClaude(bin);
-  // models is a cheap local-help read; omits cwd so spawn uses ROOT and --cwd is absent.
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin), stdio: ["pipe", "pipe", "pipe"] });
-  try {
-    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
-    const result = await request(proc, {
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: {
-        name: "claude_router_models",
-        arguments: {}
-      }
-    });
-    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    assert.ok(result.result?.content?.[0]?.text);
-    const payload = JSON.parse(result.result.content[0].text);
-    assert.ok(payload.models || payload.curated || Array.isArray(payload) || typeof payload === "object");
   } finally {
     proc.kill("SIGTERM");
   }

@@ -14,59 +14,39 @@ const schema = readJson(schemaPath);
 const manifest = readJson(path.join(fixtureDir, "manifest.json"));
 const fixtures = new Map(manifest.records.map((record) => [record.definition, record.fixture]));
 
-test("V2 schema exposes all planned record definitions", () => {
+test("V2 fixtures validate against the public schema", () => {
   assert.deepEqual(schema["x-recordDefinitions"], [...fixtures.keys()]);
-
   for (const definitionName of schema["x-recordDefinitions"]) {
     assert.ok(schema.$defs[definitionName], `missing $defs.${definitionName}`);
   }
-});
 
-test("V2 fixture manifest accounts for every fixture file", () => {
   const expected = new Set(["manifest.json", ...fixtures.values()]);
   const actual = new Set(fs.readdirSync(fixtureDir).filter((entry) => entry.endsWith(".json")));
-
   assert.deepEqual(actual, expected);
-});
 
-for (const [definitionName, fixtureName] of fixtures) {
-  test(`${fixtureName} validates against ${definitionName}`, () => {
+  for (const [definitionName, fixtureName] of fixtures) {
     const fixture = readJson(path.join(fixtureDir, fixtureName));
-    const errors = validateSchema(schema, fixture, definitionName);
-    assert.deepEqual(errors, []);
-  });
-}
+    assert.deepEqual(validateSchema(schema, fixture, definitionName), [], fixtureName);
+  }
 
-test("root V2 schema accepts a known record and rejects unrelated JSON", () => {
-  const fixture = readJson(path.join(fixtureDir, fixtures.get("RouteIntent")));
-
-  assert.deepEqual(validateSchema(schema, fixture), []);
+  const routeIntent = readJson(path.join(fixtureDir, fixtures.get("RouteIntent")));
+  assert.deepEqual(validateSchema(schema, routeIntent), []);
   assert.notDeepEqual(validateSchema(schema, { arbitrary: true }), []);
-});
 
-test("V2 schema rejects missing required fields", () => {
-  const fixture = readJson(path.join(fixtureDir, fixtures.get("RouteIntent")));
-  delete fixture.id;
+  delete routeIntent.id;
+  assert.match(validateSchema(schema, routeIntent, "RouteIntent").join("\n"), /RouteIntent.id is required/);
 
-  assert.match(validateSchema(schema, fixture, "RouteIntent").join("\n"), /RouteIntent.id is required/);
-});
-
-test("V2 schema rejects additional properties on strict records", () => {
-  const fixture = readJson(path.join(fixtureDir, fixtures.get("PolicyDecision")));
-  fixture.extra = true;
-
+  const policyDecision = readJson(path.join(fixtureDir, fixtures.get("PolicyDecision")));
+  policyDecision.extra = true;
   assert.match(
-    validateSchema(schema, fixture, "PolicyDecision").join("\n"),
+    validateSchema(schema, policyDecision, "PolicyDecision").join("\n"),
     /PolicyDecision.extra is not allowed/
   );
-});
 
-test("V2 schema rejects invalid risk classes everywhere they are typed", () => {
-  const fixture = readJson(path.join(fixtureDir, fixtures.get("ApprovalRecord")));
-  fixture.classification = ["config_mutation", "typoed_risk"];
-
+  const approvalRecord = readJson(path.join(fixtureDir, fixtures.get("ApprovalRecord")));
+  approvalRecord.classification = ["config_mutation", "typoed_risk"];
   assert.match(
-    validateSchema(schema, fixture, "ApprovalRecord").join("\n"),
+    validateSchema(schema, approvalRecord, "ApprovalRecord").join("\n"),
     /ApprovalRecord.classification\[1\] must be one of/
   );
 });

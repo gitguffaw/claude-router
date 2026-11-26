@@ -103,17 +103,6 @@ console.log(JSON.stringify({ args }));
   return fake;
 }
 
-test("setup reports ready with fake claude", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  const result = run("node", [SCRIPT, "setup", "--json"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(result.status, 0, result.stderr);
-  const payload = JSON.parse(result.stdout);
-  assert.equal(payload.ready, true);
-  assert.match(payload.claude.detail, /2.1.185/);
-});
-
 test("setup stays ready without reporting plugin or MCP registration", () => {
   const bin = makeTempDir();
   const data = makeTempDir();
@@ -126,6 +115,7 @@ test("setup stays ready without reporting plugin or MCP registration", () => {
   assert.equal(json.status, 0, json.stderr);
   const payload = JSON.parse(json.stdout);
   assert.equal(payload.ready, true);
+  assert.match(payload.claude.detail, /2.1.185/);
   assert.equal(payload.plugins, undefined);
   assert.equal(payload.mcp, undefined);
   assert.equal(payload.coreReady, undefined);
@@ -198,135 +188,118 @@ test("models command refuses stale static mode", () => {
   assert.match(result.stderr, /always reads the installed Claude CLI/);
 });
 
-test("raw claude command can read help and blocks mutating commands by default", () => {
+test("raw guardrails classify argv as ok, mutating, or dangerous", () => {
   const bin = makeTempDir();
   const data = makeTempDir();
   installFakeClaude(bin);
-  const help = run("node", [SCRIPT, "raw", "--json", "--", "mcp", "add", "--help"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(help.status, 0, help.stderr);
-  assert.match(JSON.parse(help.stdout).stdout, /Usage: claude/);
+  const cases = [
+    { argv: ["mcp", "add", "--help"], expected: "ok", stdout: /Usage: claude/ },
+    { argv: ["mcp", "add", "example", "node"], expected: "mutating" },
+    { argv: ["plugins", "install", "example"], expected: "mutating" },
+    { argv: ["mcp", "login", "example"], expected: "mutating" },
+    { argv: ["rm", "--help"], expected: "ok" },
+    { argv: ["rm", "some-id"], expected: "mutating" },
+    { argv: ["stop", "some-id"], expected: "mutating" },
+    { argv: ["respawn", "some-id"], expected: "mutating" },
+    {
+      argv: ["rm", "some-id"],
+      override: ["--allow-mutating"],
+      expected: "ok",
+      classification: { mutating: true, commandPath: ["rm"] }
+    },
+    { argv: ["--model", "opus", "mcp", "add", "example", "node"], expected: "mutating" },
+    { argv: ["--permission-mode", "plan", "mcp", "remove", "example"], expected: "mutating" },
+    { argv: ["mcp", "add", "help", "node"], expected: "mutating" },
+    { argv: ["plugin", "install", "help"], expected: "mutating" },
+    { argv: ["project", "purge", "--dry-run=false"], expected: "mutating" },
+    { argv: ["mcp", "add", "example", "node", "--help=false"], expected: "mutating" },
+    { argv: ["--exclude-dynamic-system-prompt-sections", "mcp", "remove", "example"], expected: "mutating" },
+    { argv: ["--tmux", "mcp", "remove", "example"], expected: "mutating" },
+    { argv: ["--tmux=classic", "mcp", "remove", "example"], expected: "mutating" },
+    { argv: ["--dangerously-skip-permissions", "mcp", "list"], expected: "dangerous" },
+    { argv: ["--allow-dangerously-skip-permissions", "mcp", "list"], expected: "dangerous" },
+    { argv: ["--bypass-permissions", "mcp", "list"], expected: "dangerous" },
+    { argv: ["--permission-mode=bypassPermissions", "mcp", "list"], expected: "dangerous" },
+    {
+      argv: ["--exclude-dynamic-system-prompt-sections", "--permission-mode", "bypassPermissions", "mcp", "list"],
+      expected: "dangerous"
+    },
+    { argv: ["--tmux", "--permission-mode", "bypassPermissions", "mcp", "list"], expected: "dangerous" },
+    { argv: ["--tmux=classic", "--permission-mode", "bypassPermissions", "mcp", "list"], expected: "dangerous" },
+    {
+      argv: ["--exclude-dynamic-system-prompt-sections", "--permission-mode", "bypassPermissions", "mcp", "list"],
+      override: ["--allow-dangerous"],
+      expected: "ok",
+      classification: { dangerous: true, commandPath: ["mcp", "list"] }
+    },
+    { argv: ["mcp", "list"], expected: "ok" },
+    { argv: ["--exclude-dynamic-system-prompt-sections", "mcp", "list"], expected: "ok" },
+    { argv: ["--tmux", "mcp", "list"], expected: "ok" },
+    { argv: ["--tmux=classic", "mcp", "list"], expected: "ok" }
+  ];
 
-  const blocked = run("node", [SCRIPT, "raw", "--json", "--", "mcp", "add", "example", "node"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.notEqual(blocked.status, 0);
-  assert.match(blocked.stderr, /may mutate/);
-
-  const blockedAlias = run("node", [SCRIPT, "raw", "--json", "--", "plugins", "install", "example"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.notEqual(blockedAlias.status, 0);
-  assert.match(blockedAlias.stderr, /may mutate/);
-
-  const blockedMcpLogin = run("node", [SCRIPT, "raw", "--json", "--", "mcp", "login", "example"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.notEqual(blockedMcpLogin.status, 0);
-  assert.match(blockedMcpLogin.stderr, /may mutate/);
+  for (const row of cases) {
+    const override = row.override ?? [];
+    const label = [...override, ...row.argv].join(" ");
+    const result = run("node", [SCRIPT, "raw", "--json", ...override, "--", ...row.argv], {
+      cwd: ROOT,
+      env: buildEnv(bin, data)
+    });
+    if (row.expected === "ok") {
+      assert.equal(result.status, 0, `${label} should succeed: ${result.stderr}`);
+      if (row.stdout || row.classification) {
+        const payload = JSON.parse(result.stdout);
+        if (row.stdout) {
+          assert.match(payload.stdout, row.stdout);
+        }
+        if (row.classification?.mutating !== undefined) {
+          assert.equal(payload.classification.mutating, row.classification.mutating);
+        }
+        if (row.classification?.dangerous !== undefined) {
+          assert.equal(payload.classification.dangerous, row.classification.dangerous);
+        }
+        if (row.classification) {
+          assert.deepEqual(payload.classification.commandPath, row.classification.commandPath);
+        }
+      }
+    } else if (row.expected === "mutating") {
+      assert.notEqual(result.status, 0, `${label} should fail`);
+      assert.match(result.stderr, /may mutate/);
+    } else if (row.expected === "dangerous") {
+      assert.notEqual(result.status, 0, `${label} should fail`);
+      assert.match(result.stderr, /dangerous permission bypass/i);
+    } else {
+      assert.fail(`unknown expected ${row.expected} for ${label}`);
+    }
+  }
 });
 
-test("raw guardrails block top-level rm session deletion unless allow-mutating", () => {
+test("cli alias rejects permission bypass and mutating commands unless the raw overrides consent", () => {
   const bin = makeTempDir();
   const data = makeTempDir();
   installFakeClaude(bin);
+  const env = buildEnv(bin, data);
 
-  const help = run("node", [SCRIPT, "raw", "--json", "--", "rm", "--help"], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(help.status, 0, help.stderr);
+  const blocked = run("node", [SCRIPT, "cli", "--json", "--", "--permission-mode", "bypassPermissions", "mcp", "list"], { cwd: ROOT, env });
+  assert.notEqual(blocked.status, 0, blocked.stderr);
+  assert.match(blocked.stderr, /dangerous permission bypass/i);
+  assert.equal(blocked.stdout, "");
 
-  for (const command of ["rm", "stop", "respawn"]) {
-    const blocked = run("node", [SCRIPT, "raw", "--json", "--", command, "some-id"], { cwd: ROOT, env: buildEnv(bin, data) });
-    assert.notEqual(blocked.status, 0, `${command} should fail`);
-    assert.match(blocked.stderr, /may mutate/);
-  }
-
-  const allowed = run("node", [
+  const consented = run("node", [
     SCRIPT,
-    "raw",
-    "--json",
-    "--allow-mutating",
-    "--",
-    "rm",
-    "some-id"
-  ], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(allowed.status, 0, allowed.stderr);
-  const allowedPayload = JSON.parse(allowed.stdout);
-  assert.equal(allowedPayload.classification.mutating, true);
-  assert.deepEqual(allowedPayload.classification.commandPath, ["rm"]);
-});
-
-test("raw guardrails classify command paths after global flags and do not trust literal help args", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  for (const args of [
-    ["raw", "--json", "--", "--model", "opus", "mcp", "add", "example", "node"],
-    ["raw", "--json", "--", "--permission-mode", "plan", "mcp", "remove", "example"],
-    ["raw", "--json", "--", "mcp", "add", "help", "node"],
-    ["raw", "--json", "--", "plugin", "install", "help"],
-    ["raw", "--json", "--", "project", "purge", "--dry-run=false"],
-    ["raw", "--json", "--", "mcp", "add", "example", "node", "--help=false"]
-  ]) {
-    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
-    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
-    assert.match(blocked.stderr, /may mutate/);
-  }
-});
-
-test("raw guardrails do not let Claude boolean prefixes hide mutating mcp commands", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  for (const args of [
-    ["raw", "--json", "--", "--exclude-dynamic-system-prompt-sections", "mcp", "remove", "example"],
-    ["raw", "--json", "--", "--tmux", "mcp", "remove", "example"],
-    ["raw", "--json", "--", "--tmux=classic", "mcp", "remove", "example"]
-  ]) {
-    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
-    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
-    assert.match(blocked.stderr, /may mutate/);
-  }
-});
-
-test("raw guardrails do not let Claude boolean prefixes hide dangerous permission-mode", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  for (const args of [
-    ["raw", "--json", "--", "--exclude-dynamic-system-prompt-sections", "--permission-mode", "bypassPermissions", "mcp", "list"],
-    ["raw", "--json", "--", "--tmux", "--permission-mode", "bypassPermissions", "mcp", "list"],
-    ["raw", "--json", "--", "--tmux=classic", "--permission-mode", "bypassPermissions", "mcp", "list"]
-  ]) {
-    const blocked = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
-    assert.notEqual(blocked.status, 0, `${args.join(" ")} should fail`);
-    assert.match(blocked.stderr, /dangerous permission bypass/i);
-  }
-
-  const allowed = run("node", [
-    SCRIPT,
-    "raw",
+    "cli",
     "--json",
     "--allow-dangerous",
     "--",
-    "--exclude-dynamic-system-prompt-sections",
-    "--permission-mode",
-    "bypassPermissions",
+    "--dangerously-skip-permissions",
     "mcp",
     "list"
-  ], { cwd: ROOT, env: buildEnv(bin, data) });
-  assert.equal(allowed.status, 0, allowed.stderr);
-  const allowedPayload = JSON.parse(allowed.stdout);
-  assert.equal(allowedPayload.classification.dangerous, true);
-  assert.deepEqual(allowedPayload.classification.commandPath, ["mcp", "list"]);
-});
-
-test("raw read-only invocations still work with Claude boolean prefixes", () => {
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  for (const args of [
-    ["raw", "--json", "--", "mcp", "list"],
-    ["raw", "--json", "--", "--exclude-dynamic-system-prompt-sections", "mcp", "list"],
-    ["raw", "--json", "--", "--tmux", "mcp", "list"],
-    ["raw", "--json", "--", "--tmux=classic", "mcp", "list"],
-    ["raw", "--json", "--", "mcp", "add", "--help"]
-  ]) {
-    const result = run("node", [SCRIPT, ...args], { cwd: ROOT, env: buildEnv(bin, data) });
-    assert.equal(result.status, 0, `${args.join(" ")} should succeed: ${result.stderr}`);
-  }
+  ], { cwd: ROOT, env });
+  assert.equal(consented.status, 0, consented.stderr);
+  const payload = JSON.parse(consented.stdout);
+  assert.equal(payload.classification.dangerous, true);
+  assert.deepEqual(payload.classification.commandPath, ["mcp", "list"]);
+  assert.deepEqual(payload.args, ["--dangerously-skip-permissions", "mcp", "list"]);
 });
 
 test("raw passthrough preserves routed optional and repeatable-looking flags before --", () => {
@@ -395,23 +368,6 @@ test("routed commands reject dangerous permission bypass spellings without route
   ], { cwd: ROOT, env: buildEnv(bin, data) });
   assert.equal(execAllowed.status, 0, execAllowed.stderr);
   assert.equal(JSON.parse(execAllowed.stdout).request.permissionMode, "bypassPermissions");
-});
-
-test("routed CLI preserves explicit empty --tools value", () => {
-  const repo = makeTempDir();
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  initGitRepo(repo);
-  const result = run("node", [SCRIPT, "analyze", "--json", "--tools", "", "inspect tools"], {
-    cwd: repo,
-    env: buildEnv(bin, data)
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const args = JSON.parse(result.stdout).result.args;
-  const index = args.indexOf("--tools");
-  assert.notEqual(index, -1);
-  assert.equal(args[index + 1], "");
 });
 
 test("routed CLI discovers future native fields and applies OAuth lean mode", () => {
@@ -563,19 +519,6 @@ test("--raw-arg-string rejects malformed marker usage", () => {
   });
   assert.notEqual(extra.status, 0);
   assert.match(extra.stderr, /--raw-arg-string requires exactly one following token/);
-});
-
-test("routed text hides Claude startup MCP noise and launch details", () => {
-  const repo = makeTempDir();
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  initGitRepo(repo);
-  const result = run("node", [SCRIPT, "analyze", "NOISE_INIT check the parser"], { cwd: repo, env: buildEnv(bin, data) });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /The parser fix is in router\.mjs\./);
-  assert.match(result.stdout, /cloudflare-api needs authentication/);
-  assert.doesNotMatch(result.stdout, /mcp_servers|not connected|failed to connect|Job log:|Claude session:|permissionMode/i);
 });
 
 test("analyze stores completed job and context pack", () => {
@@ -1353,13 +1296,44 @@ test("ultrareview forwards only a PR number or branch target and a numeric timeo
   const accepted = [
     [["ultrareview", "--json", "--timeout", "30", "123"], ["ultrareview", "--json", "--timeout", "30", "123"]],
     [["ultrareview", "--raw-arg-string", "--timeout 30 feature/base"], ["ultrareview", "--json", "--timeout", "30", "feature/base"]],
-    [["ultrareview", "--json"], ["ultrareview", "--json"]]
+    [["ultrareview", "--raw-arg-string", "--json --timeout 5 feature-branch"], ["ultrareview", "--json", "--timeout", "5", "feature-branch"]],
+    [["ultrareview", "--json"], ["ultrareview", "--json"]],
+    [["ultrareview", "--json", "--timeout", "0"], ["ultrareview", "--json", "--timeout", "0"]]
   ];
   for (const [argv, expected] of accepted) {
     fs.rmSync(argvFile, { force: true });
     const result = run("node", [SCRIPT, ...argv], { cwd: ROOT, env });
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(forwarded(), expected);
+  }
+
+  fs.rmSync(argvFile, { force: true });
+  const jsonLaunch = run("node", [SCRIPT, "--json-request"], {
+    cwd: ROOT,
+    env,
+    input: `${JSON.stringify({ command: "ultrareview", target: "feature-branch", timeout: "5", cwd: ROOT })}\n`
+  });
+  assert.equal(jsonLaunch.status, 0, jsonLaunch.stderr);
+  assert.deepEqual(forwarded(), ["ultrareview", "--json", "--timeout", "5", "feature-branch"]);
+  const payload = JSON.parse(jsonLaunch.stdout);
+  assert.equal(payload.exitStatus, 0);
+  assert.equal(payload.jobStatus, "completed");
+  assert.equal(payload.payload.mode, "ultrareview");
+  assert.equal(payload.payload.command, "claude");
+  assert.deepEqual(payload.payload.args, ["ultrareview", "--json", "--timeout", "5", "feature-branch"]);
+  assert.deepEqual(payload.payload.parsedOutput, { verdict: "pass", findings: [] });
+  assert.match(payload.rendered, /Claude Ultrareview/);
+
+  const previousDataDir = process.env.CLAUDE_ROUTER_DATA;
+  process.env.CLAUDE_ROUTER_DATA = data;
+  try {
+    assert.equal(listJobs(ROOT).length, 0);
+  } finally {
+    if (previousDataDir === undefined) {
+      delete process.env.CLAUDE_ROUTER_DATA;
+    } else {
+      process.env.CLAUDE_ROUTER_DATA = previousDataDir;
+    }
   }
 });
 

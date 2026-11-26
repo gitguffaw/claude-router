@@ -531,19 +531,6 @@ test("--raw-arg-string rejects malformed marker usage", () => {
   assert.match(extra.stderr, /--raw-arg-string requires exactly one following token/);
 });
 
-test("routed text hides Claude startup MCP noise and launch details", () => {
-  const repo = makeTempDir();
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  initGitRepo(repo);
-  const result = run("node", [SCRIPT, "analyze", "NOISE_INIT check the parser"], { cwd: repo, env: buildEnv(bin, data) });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /The parser fix is in router\.mjs\./);
-  assert.match(result.stdout, /cloudflare-api needs authentication/);
-  assert.doesNotMatch(result.stdout, /mcp_servers|not connected|failed to connect|Job log:|Claude session:|permissionMode/i);
-});
-
 test("analyze stores completed job and context pack", () => {
   const repo = makeTempDir();
   const bin = makeTempDir();

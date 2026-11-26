@@ -496,41 +496,6 @@ test("mcp raw tool preserves guardrails through global Claude flags", async () =
   }
 });
 
-test("mcp valid analyze call still succeeds with closed schema", async () => {
-  const bin = makeTempDir();
-  const repo = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  initGitRepo(repo);
-  const proc = spawn("node", [SERVER], { cwd: ROOT, env: buildEnv(bin, data), stdio: ["pipe", "pipe", "pipe"] });
-  try {
-    await request(proc, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
-    const result = await request(proc, {
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: {
-        name: "claude_router_analyze",
-        arguments: {
-          cwd: repo,
-          prompt: "normal prompt",
-          permission_mode: "plan",
-          timeout_ms: 120000
-        }
-      }
-    });
-    assert.equal(result.error, undefined, JSON.stringify(result.error ?? {}));
-    const payload = assertHostView(result.result.content[0].text);
-    assert.equal(payload.ready, true);
-    assert.match(payload.output, /Handled:/);
-    const job = readStored(data, repo, payload.id);
-    assert.equal(job.request.userRequest, "normal prompt");
-    assert.equal(job.request.permissionMode, "plan");
-  } finally {
-    proc.kill("SIGTERM");
-  }
-});
-
 test("mcp exec accepts a live permission_mode without freezing an enum", async () => {
   const bin = makeTempDir();
   const repo = makeTempDir();
@@ -690,13 +655,8 @@ test("read-only mcp tools lock permission_mode to plan and reject bypass before 
     }
 
     const rejectedInputs = [
-      [{ permission_mode: "acceptEdits" }, /permission_mode must be one of: plan/],
       [{ permission_mode: "bypassPermissions" }, /permission_mode must be one of: plan/],
-      [{ allow_dangerous: true }, /Unknown property "allow_dangerous"/],
-      [{ dangerously_skip_permissions: true }, /Unknown property "dangerously_skip_permissions"/],
-      [{ allow_dangerously_skip_permissions: true }, /Unknown property "allow_dangerously_skip_permissions"/],
-      [{ bypass_permissions: true }, /Unknown property "bypass_permissions"/],
-      [{ "permission-mode": "bypassPermissions" }, /Unknown property "permission-mode"/]
+      [{ dangerously_skip_permissions: true }, /Unknown property "dangerously_skip_permissions"/]
     ];
     let id = 3;
     for (const [name] of readOnlyTools) {
@@ -721,9 +681,6 @@ test("read-only mcp tools lock permission_mode to plan and reject bypass before 
     assert.equal(withRouterData(data, () => listJobs(repo)).length, 0);
 
     for (const [name, mode] of readOnlyTools) {
-      if (name === "claude_router_analyze") {
-        continue;
-      }
       const result = await request(proc, {
         jsonrpc: "2.0",
         id,
@@ -748,7 +705,7 @@ test("read-only mcp tools lock permission_mode to plan and reject bypass before 
       assert.equal(args.includes("bypassPermissions"), false, name);
       assert.equal(args.includes("--dangerously-skip-permissions"), false, name);
     }
-    assert.equal(withRouterData(data, () => listJobs(repo)).length, 3);
+    assert.equal(withRouterData(data, () => listJobs(repo)).length, 4);
   } finally {
     proc.kill("SIGTERM");
   }

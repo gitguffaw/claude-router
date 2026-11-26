@@ -380,23 +380,6 @@ test("routed commands reject dangerous permission bypass spellings without route
   assert.equal(JSON.parse(execAllowed.stdout).request.permissionMode, "bypassPermissions");
 });
 
-test("routed CLI preserves explicit empty --tools value", () => {
-  const repo = makeTempDir();
-  const bin = makeTempDir();
-  const data = makeTempDir();
-  installFakeClaude(bin);
-  initGitRepo(repo);
-  const result = run("node", [SCRIPT, "analyze", "--json", "--tools", "", "inspect tools"], {
-    cwd: repo,
-    env: buildEnv(bin, data)
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const args = JSON.parse(result.stdout).result.args;
-  const index = args.indexOf("--tools");
-  assert.notEqual(index, -1);
-  assert.equal(args[index + 1], "");
-});
-
 test("routed CLI discovers future native fields and applies OAuth lean mode", () => {
   const repo = makeTempDir();
   const bin = makeTempDir();

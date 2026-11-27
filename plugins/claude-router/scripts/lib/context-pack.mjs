@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureStateDir, resolveStateDir } from "./state.mjs";
+import { redactDeep } from "./redact.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const POLICY_ROOT = path.join(ROOT, "policy", "ClaudeCode");
@@ -46,9 +47,9 @@ export function createContextPack(workspaceRoot, request) {
     policyHash,
     mode: request.mode,
     workflow: request.workflow,
-    userRequest: request.userRequest,
-    prompt: request.prompt,
-    controls: request.controls ?? {},
+    userRequest: redactDeep(request.userRequest),
+    prompt: redactDeep(request.prompt),
+    controls: redactDeep(request.controls ?? {}),
     write: Boolean(request.write),
     nonGoals: request.nonGoals ?? [],
     constraints: request.constraints ?? [],

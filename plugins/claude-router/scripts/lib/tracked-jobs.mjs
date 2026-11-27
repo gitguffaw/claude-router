@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { currentProcessRecord } from "./process.mjs";
 import { readJobFile, resolveJobLogFile, transitionJob } from "./state.mjs";
+import { redactSecrets } from "./redact.mjs";
 
 export const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
 export const TERMINAL_JOB_STATUSES = new Set(["completed", "completed-with-warnings", "blocked", "failed", "interrupted", "cancelled"]);
@@ -15,15 +16,6 @@ export function isActiveJobStatus(status) {
 
 export function isCancelInProgress(job) {
   return Boolean(job && (job.phase === "cancelling" || job.cancelRequestedAt));
-}
-
-function redactSecrets(value) {
-  return String(value ?? "")
-    .replace(/(ANTHROPIC_API_KEY=)[^\s]+/g, "$1REDACTED")
-    .replace(/(OPENAI_API_KEY=)[^\s]+/g, "$1REDACTED")
-    .replace(/(Authorization:\s*Bearer\s+)[^\s]+/gi, "$1REDACTED")
-    .replace(/(sk-ant-[A-Za-z0-9_-]{8,})/g, "sk-ant-REDACTED")
-    .replace(/(sk-[A-Za-z0-9_-]{12,})/g, "sk-REDACTED");
 }
 
 /** Log paths that failed a write; further appends for that path are no-ops. */

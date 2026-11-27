@@ -35,6 +35,10 @@ if (args.includes("--version")) {
   process.exit(0);
 }
 if (args.includes("--help")) {
+  if (process.env.FAKE_CLAUDE_HELP_FAIL === "1") {
+    console.error("help unavailable");
+    process.exit(1);
+  }
   console.log("Usage: claude [options] [command] [prompt]\\nOptions:\\n  --model <model>  Model for the current session. Provide an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g. 'claude-fable-5').\\n  --effort <level> Effort level (low, medium, high, xhigh, max)\\n  --permission-mode <mode> Permission mode (choices: \\"acceptEdits\\", \\"auto\\", \\"bypassPermissions\\", \\"manual\\", \\"dontAsk\\", \\"plan\\")\\n  --allow-dangerously-skip-permissions Enable bypass as an option\\n  --dangerously-skip-permissions Bypass permissions\\n  --safe-mode Disable customizations while keeping OAuth\\n  --bare Minimal API-key mode\\n  --tools <tools...> Built-in tools\\n  --system-prompt <prompt> Replace the system prompt\\n  --future-flag <value> Future Claude field\\nCommands:\\n  mcp\\n  plugin\\n  agents");
   process.exit(0);
 }
@@ -62,6 +66,12 @@ if (args[0] === "ultrareview") {
   process.exit(0);
 }
 if (args.includes("-p")) {
+  if (process.env.FAKE_CLAUDE_PRINT_ARGV_FILE) {
+    fs.writeFileSync(process.env.FAKE_CLAUDE_PRINT_ARGV_FILE, JSON.stringify(args));
+  }
+  if (process.env.FAKE_CLAUDE_STDERR_ECHO === "1") {
+    process.stderr.write("warning: " + (args[args.length - 1] || "") + "\\n");
+  }
   const prompt = args[args.length - 1] || "";
   if (prompt.includes("SLEEP")) {
     if (process.env.FAKE_CLAUDE_PID_FILE) {

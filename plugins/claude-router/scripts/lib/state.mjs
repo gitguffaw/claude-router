@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { buildProcessRecord, getProcessStartTime } from "./process.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
+import { redactJobForStorage } from "./redact.mjs";
 
 const STATE_VERSION = 1;
 const MAX_JOBS = 50;
@@ -516,7 +517,11 @@ function saveStateUnlocked(cwd, state, identity) {
   ensureStateDir(cwd);
   const nextJobs = pruneJobs(state.jobs ?? []);
   const retained = new Set(nextJobs.map((job) => job.id).filter(Boolean));
-  const nextState = { version: STATE_VERSION, config: state.config ?? {}, jobs: nextJobs };
+  const nextState = {
+    version: STATE_VERSION,
+    config: state.config ?? {},
+    jobs: nextJobs.map((job) => redactJobForStorage(job, ACTIVE_JOB_STATUSES))
+  };
   // Commit-time ownership check: refuse to write if our lock was stolen/unlinked.
   assertLockOwnership(resolveLockFile(cwd), identity);
   writeJsonAtomic(resolveStateFile(cwd), nextState);
@@ -570,7 +575,7 @@ export function upsertJob(cwd, patch) {
 export function writeJobFile(cwd, jobId, payload) {
   ensureStateDir(cwd);
   const file = resolveJobFile(cwd, jobId);
-  writeJsonAtomic(file, payload);
+  writeJsonAtomic(file, redactJobForStorage(payload, ACTIVE_JOB_STATUSES));
   return file;
 }
 
@@ -635,7 +640,7 @@ export function transitionJob(cwd, jobId, decide) {
     ensureStateDir(cwd);
     // First write of this commit is the per-job file; verify ownership before it.
     assertLockOwnership(resolveLockFile(cwd), identity);
-    writeJsonAtomic(file, next);
+    writeJsonAtomic(file, redactJobForStorage(next, ACTIVE_JOB_STATUSES));
     saveStateUnlocked(cwd, state, identity);
     return {
       applied: true,

@@ -2,39 +2,39 @@
 
 Current release: `v2.5.2`
 
-Claude Router lets one coding agent delegate a bounded task to the Claude Code CLI already installed on your computer. Its primary host surfaces are the **Codex app/CLI** and **Google Antigravity/Antigravity CLI (`agy`)**. An optional Claude Code adapter exposes the same managed modes as slash commands, but Claude Code does not need this router to run its own native sessions or subagents.
+Claude Router lets a coding agent hand a task to the Claude CLI installed on your computer. It is built for Codex, both the app and the CLI, and for Google Antigravity, both the IDE and the `agy` CLI. An adapter for Claude Code offers the same modes as slash commands, though Claude Code runs its own sessions and subagents without it.
 
-The **host** is the agent you are talking to. The **runtime** is the local `claude` process that performs the delegated work.
+The host is the agent you are talking to. The Claude CLI is the `claude` command that ships with Claude Code, and it does the work.
 
 ```text
-Your request in Codex or Antigravity
+You ask Codex or Antigravity to use Claude Router
         ↓
-Claude Router selects a task contract, permissions, and job settings
+Claude Router wraps the task in a contract and sets the permission mode
         ↓
-Your locally installed Claude Code CLI performs the work
+The Claude CLI on your machine does the work
         ↓
-Claude Router returns the result or stores it as a background job
+Claude Router returns the result, or a job ID for a background job
 ```
 
-Claude Router is a local task dispatcher, not a cloud proxy or model provider. It uses the Claude authentication and models already available on your machine.
+Claude Router runs on your machine. It is not a cloud proxy and it provides no models. It starts `claude` with the login and models you already have.
 
-> **Desktop naming:** the supported OpenAI desktop host is the **Codex app**. This repository does not ship a separate ChatGPT desktop app integration.
+On the desktop, the OpenAI host is the Codex app. This repository has no integration for the ChatGPT desktop app.
 
-## Choose Your Host
+## Choose your host
 
-| Host | Integration | Recommended use |
+| Host | How it connects | When to use it |
 | --- | --- | --- |
-| Codex app or Codex CLI | Packaged Codex plugin with `claude_router_*` MCP tools | Primary OpenAI-hosted workflow; ask Codex in plain English to delegate a task to Claude. |
-| Antigravity IDE | Antigravity plugin/skill registration | Primary Google-hosted workflow; keep the repository checkout available to the skill. |
-| Antigravity CLI (`agy`) | `.agy` plugin/skill registration | Use the same managed modes from the Antigravity command-line host. |
-| Claude Code | Optional `/claude-router:*` command adapter | Use only when you specifically want the router's contracts, guardrails, or persistent job format inside Claude Code. |
-| Shell or automation | Direct Node.js companion runtime | Development, debugging, or scripted use without a host plugin. |
+| Codex app or Codex CLI | Codex plugin with `claude_router_*` MCP tools | You work in Codex. Ask it in plain English to give a task to Claude. |
+| Antigravity IDE | Antigravity plugin that registers a skill | You work in Antigravity. Keep the repository checkout, because the skill runs the scripts from it. |
+| Antigravity CLI (`agy`) | The same plugin, installed from `.agy` | You work in `agy`. The checkout rule is the same. |
+| Claude Code | `/claude-router:*` slash commands | You want the router's contracts, checks, or job records inside Claude Code. Otherwise skip it. |
+| Shell or scripts | The companion script, run with `node` | Development, debugging, and automation without a host. |
 
-The Codex, Antigravity, and Claude Code adapters all call the same companion runtime under `plugins/claude-router`. The host packaging differs; the task modes do not.
+Every adapter calls the same script, `plugins/claude-router/scripts/claude-companion.mjs`. This README calls it the companion. The packaging differs by host. The modes do not.
 
-## Start Here
+## Start here
 
-You normally do not need exact tool names. Ask the host agent to use Claude Router and describe the boundary you want:
+You don't need tool names. Ask the host to use Claude Router and say what Claude may and may not do:
 
 ```text
 Use Claude Router to analyze the authentication flow in this repository.
@@ -63,7 +63,7 @@ Use Claude Router adversarial review on the proposed cache layer.
 Challenge whether the cache is necessary and identify invalidation assumptions.
 ```
 
-For a long-running task:
+For a long task:
 
 ```text
 Use Claude Router to analyze this repository in the background.
@@ -77,36 +77,42 @@ Show the Claude Router job status.
 Get the Claude Router result when it finishes.
 ```
 
-## Managed Modes
+## Managed modes
 
-| Mode | Writes project files? | Purpose |
+| Command | Edits project files | What it does |
 | --- | --- | --- |
-| `analyze` | No | Facts, diagnosis, tradeoffs, recommendation, and next action |
-| `plan` | No | Concrete implementation or migration plan |
-| `exec` | Yes | Bounded implementation with verification summary |
-| `review` | No | Findings-first code review without auto-fixes |
-| `adversarial-review` | No | Challenge the approach, assumptions, and design tradeoffs |
-| `ultrareview` | No | Wrapper around Claude's installed cloud-hosted `ultrareview` command |
-| `status` | No | List jobs or inspect one job; optionally wait for a terminal state |
-| `result` | No | Retrieve a stored job result |
-| `cancel` | No | Cancel an active tracked job |
-| `models` | No | Discover model examples, fields, choices, and lean profiles from the installed CLI |
-| `surface` | No | Show the installed Claude version/help and router coverage |
-| `help` | No | Show router help or installed Claude subcommand help |
-| `version` | No | Show Claude Router and installed Claude CLI versions |
-| `raw` / `cli` | Depends | Guarded passthrough for Claude CLI features outside the managed modes |
+| `analyze` | No | Reports facts, tradeoffs, a recommendation, and a next action |
+| `plan` | No | Writes an implementation or migration plan |
+| `exec` | Yes | Makes a narrow change and reports what it touched and how it checked it |
+| `review` | No | Reviews code, findings first, no fixes |
+| `adversarial-review` | No | Challenges the approach, the assumptions, and the design tradeoffs |
+| `ultrareview` | No | Runs Claude's cloud-hosted `ultrareview` command |
+| `status` | No | Lists jobs or shows one, and can wait for it to finish |
+| `result` | No | Shows a stored job result |
+| `cancel` | No | Cancels a running job |
+| `models` | No | Lists the model examples, flags, effort levels, and lean profiles the installed CLI advertises |
+| `setup` | No | Checks Node, the Claude CLI, and Claude login |
+| `surface` | No | Shows the installed Claude version and help, and which parts the router covers |
+| `help` | No | Shows router help, or Claude's help for a subcommand |
+| `version` | No | Shows the Claude Router and Claude CLI versions |
+| `raw` or `cli` | Depends | Passes any other Claude CLI command through a guard |
 
-Read-only managed modes force Claude permission mode `plan`. They snapshot Git status before and after the call; if project files change anyway, the job becomes `completed-with-warnings`. `exec` defaults to Claude permission mode `acceptEdits`.
+The first five rows are the job modes. Each one wraps your prompt in a contract, a few lines that tell Claude what to return and whether it may edit files. Each one creates a job record.
+
+`analyze`, `plan`, `review`, and `adversarial-review` are read-only. The router runs them in Claude permission mode `plan` and rejects any other mode, even with `--allow-dangerous`. `exec` defaults to `acceptEdits`.
+
+As a second check, the router compares `git status --short` before and after each read-only job. If the output changed, the job finishes as `completed-with-warnings`. The check misses a second edit to a file that was already modified, anything Git ignores, and any project that is not a Git repository.
+
+`ultrareview` is a thin wrapper around `claude ultrareview`. It takes a target and `--timeout`. It keeps no job record and has no background mode, permission mode, or `--timeout-ms`.
 
 ## Requirements
 
-All hosts require:
+Every host needs:
 
 - Node.js 18.18 or newer
-- Claude Code CLI installed locally
-- Claude Code already authenticated
+- The Claude CLI, installed and logged in
 
-Check the shared runtime basics:
+Check both:
 
 ```bash
 node --version
@@ -114,32 +120,32 @@ claude --version
 claude auth status
 ```
 
-Host-specific requirements:
+You also need a host:
 
-- Codex app or Codex CLI with plugin support
-- Antigravity IDE or Antigravity CLI (`agy`) for the Google-hosted integration
-- Claude Code with plugin support only if you want the optional Claude Code adapter
+- Codex app or Codex CLI, with plugin support
+- Antigravity IDE or `agy`
+- Claude Code with plugin support, if you want the Claude Code adapter
 
-The setup command checks Node, Claude CLI availability, and Claude authentication. It reports ready when those pass. It does not require every supported host to be installed.
+`setup` checks Node, the Claude CLI, and Claude login, and reports `ready` when all three pass. It does not check which hosts you have.
 
 ## Install in Codex
 
-This is the most complete packaged host integration: Codex installs the plugin runtime, skill instructions, and MCP server together.
+One install gives Codex the scripts, the skill, and the MCP server.
 
 ```bash
 codex plugin marketplace add gitguffaw/claude-router
 codex plugin add claude-router@claude-router
 ```
 
-Confirm Codex sees the plugin:
+Check that Codex sees it:
 
 ```bash
 codex plugin list | grep claude-router
 ```
 
-Start a new Codex task after installation. Plugins and MCP tools are loaded when a task starts, so an already-open task may not see a newly installed plugin.
+Then start a new Codex task. Codex loads plugins and MCP tools when a task starts, so a task that was already open may not see the plugin.
 
-For local development from a clone:
+To install from a local clone:
 
 ```bash
 git clone https://github.com/gitguffaw/claude-router.git
@@ -150,9 +156,7 @@ codex plugin add claude-router@claude-router
 
 ### Use in Codex
 
-Claude Router is a plugin, not a Codex slash command. In the Codex app, do not invoke it with `/claude-router` or `$claude-router`.
-
-Ask Codex in plain English:
+Claude Router is a plugin, not a slash command. In the Codex app, don't type `/claude-router` or `$claude-router`. Ask in plain English:
 
 ```text
 Use Claude Router to check my local setup.
@@ -162,7 +166,7 @@ Use Claude Router to check my local setup.
 Use Claude Router analyze to map this repository. Do not edit files.
 ```
 
-If automatic tool selection is ambiguous, name the exact MCP tool:
+If Codex picks the wrong tool, name the one you want:
 
 ```text
 Use `claude_router_setup` and report the result.
@@ -174,35 +178,23 @@ Use `claude_router_exec` to implement the narrowest fix for the failing tests.
 
 ### Codex tools
 
-- `claude_router_setup`
-- `claude_router_surface`
-- `claude_router_help`
-- `claude_router_version`
-- `claude_router_models`
-- `claude_router_analyze`
-- `claude_router_plan`
-- `claude_router_exec`
-- `claude_router_review`
-- `claude_router_adversarial_review`
-- `claude_router_ultrareview`
-- `claude_router_status`
-- `claude_router_result`
-- `claude_router_cancel`
-- `claude_router_raw`
+The MCP server has 15 tools, one per command in the table above. A tool's name is `claude_router_` plus the command name with hyphens as underscores, so `adversarial-review` is `claude_router_adversarial_review`. `cli` has no tool of its own. Use `claude_router_raw`.
+
+Every tool takes a `cwd`. Without one, Claude runs in the plugin's install directory and not in your project.
 
 ## Install in Antigravity
 
-Antigravity loads custom plugins from `.agents/plugins/` in a workspace or `~/.gemini/config/plugins/` globally. Claude Router's Antigravity-compatible plugin root is `.agy`, not the repository root.
+Antigravity loads plugins from `.agents/plugins/` in a workspace, or from `~/.gemini/config/plugins/` for every workspace. The plugin root for Antigravity is the `.agy` directory, not the repository root.
 
-The current Antigravity adapter registers the skill but does **not** copy the companion runtime into `.agy`. Keep the repository checkout after installation so Antigravity can run `plugins/claude-router/scripts/claude-companion.mjs` from that checkout.
+`.agy` holds a manifest and the skill, and nothing else. The scripts stay in the checkout, so keep the checkout after you install. Antigravity runs `plugins/claude-router/scripts/claude-companion.mjs` from it.
 
-Clone to a stable location:
+Clone to a place you won't move:
 
 ```bash
 git clone https://github.com/gitguffaw/claude-router.git "$HOME/.local/share/claude-router"
 ```
 
-For a global Antigravity installation, place a copy of the `.agy` plugin root in Antigravity's global plugin directory:
+For a global install, copy `.agy` into Antigravity's global plugin directory:
 
 ```bash
 mkdir -p "$HOME/.gemini/config/plugins"
@@ -210,7 +202,9 @@ cp -R "$HOME/.local/share/claude-router/.agy" \
   "$HOME/.gemini/config/plugins/claude-router"
 ```
 
-Those copy commands assume `claude-router` is not already present in the target directory. After installing, start a new Antigravity conversation and ask:
+If `~/.gemini/config/plugins/claude-router` already exists, `cp -R` puts `.agy` inside it and does not replace it. Remove the old directory first.
+
+Start a new Antigravity conversation and ask:
 
 ```text
 Use Claude Router from ~/.local/share/claude-router to check my local setup.
@@ -221,11 +215,11 @@ Use Claude Router from ~/.local/share/claude-router to review my current project
 Findings first and do not edit files.
 ```
 
-See Google's [Antigravity plugin documentation](https://antigravity.google/docs/ide/plugins) for global and workspace plugin locations.
+Google's [Antigravity plugin documentation](https://antigravity.google/docs/ide/plugins) covers the global and workspace plugin locations.
 
 ### Install in Antigravity CLI (`agy`)
 
-From a retained checkout:
+From a checkout you plan to keep:
 
 ```bash
 git clone https://github.com/gitguffaw/claude-router.git
@@ -234,61 +228,43 @@ agy plugin validate .agy
 agy plugin install .agy
 ```
 
-Confirm and enable the registration:
+Check that it registered, then enable it:
 
 ```bash
 agy plugin list
 agy plugin enable claude-router
 ```
 
-The Antigravity CLI imports the skill registration from `.agy`; the runnable scripts remain in the surrounding checkout. If the host cannot locate them automatically, include the checkout path in the request or invoke the direct runtime with an absolute path.
+`agy` imports the skill from `.agy`. The scripts stay in the checkout. If the host can't find them, put the checkout path in your request, or run the companion by absolute path:
 
 ```bash
 node "$HOME/.local/share/claude-router/plugins/claude-router/scripts/claude-companion.mjs" \
   analyze --cwd /path/to/project "map the architecture"
 ```
 
-When an Antigravity host can attach a local MCP server, start the shared server from the repository checkout:
+If your Antigravity host can attach a local MCP server over stdio, give it this command, run from the checkout:
 
 ```bash
 node plugins/claude-router/scripts/claude-router-mcp.mjs
 ```
 
-## Optional: Install in Claude Code
+## Optional: install in Claude Code
 
-This adapter is secondary. Claude Code already manages its own native sessions, agents, and subagents. Install Claude Router in Claude Code only when you want the same named task contracts, permission enforcement, guarded passthrough, or persistent router job records used by the other hosts.
+Claude Code already runs its own sessions and subagents, so most people don't need this. Install it if you want the router's contracts, read-only enforcement, guarded `raw` access, or job records inside Claude Code.
 
 ```bash
 claude plugin marketplace add gitguffaw/claude-router
 claude plugin install claude-router@claude-router
 ```
 
-Confirm the plugin is visible:
+Check that Claude Code sees it:
 
 ```bash
 claude plugin list | grep claude-router
 claude plugin details claude-router
 ```
 
-Start a new Claude Code session or run `/reload-plugins`. The optional adapter exposes:
-
-- `/claude-router:setup`
-- `/claude-router:version`
-- `/claude-router:models`
-- `/claude-router:surface`
-- `/claude-router:help`
-- `/claude-router:analyze`
-- `/claude-router:plan`
-- `/claude-router:exec`
-- `/claude-router:review`
-- `/claude-router:adversarial-review`
-- `/claude-router:ultrareview`
-- `/claude-router:status`
-- `/claude-router:result`
-- `/claude-router:cancel`
-- `/claude-router:raw` and `/claude-router:cli`
-
-Examples:
+Start a new Claude Code session or run `/reload-plugins`. Every command in the modes table becomes a slash command under `/claude-router:`, for example `/claude-router:models` and `/claude-router:adversarial-review`. Both `/claude-router:raw` and `/claude-router:cli` exist.
 
 ```text
 /claude-router:analyze inspect this repository
@@ -296,65 +272,76 @@ Examples:
 /claude-router:status <job-id> --wait
 ```
 
-## Background Jobs and Session State
+## Background jobs and session state
 
-Add `background` in a host request or `--background` in the direct runtime. The call returns a job ID instead of waiting for Claude to finish.
+Ask the host for a background job, or pass `--background` to the companion. The five job modes accept it. The call returns a job ID and Claude keeps working in a detached process.
 
 ```bash
-node plugins/claude-router/scripts/claude-companion.mjs analyze --background "map the extension points"
-node plugins/claude-router/scripts/claude-companion.mjs status
-node plugins/claude-router/scripts/claude-companion.mjs status <job-id> --wait
-node plugins/claude-router/scripts/claude-companion.mjs result <job-id>
-node plugins/claude-router/scripts/claude-companion.mjs cancel <job-id>
+cd plugins/claude-router
+node scripts/claude-companion.mjs analyze --background "map the extension points"
+node scripts/claude-companion.mjs status
+node scripts/claude-companion.mjs status <job-id> --wait
+node scripts/claude-companion.mjs result <job-id>
+node scripts/claude-companion.mjs cancel <job-id>
 ```
 
-`status --wait` rechecks the recorded worker and foreground companion on every polling cycle. It returns when the job completes, fails, is cancelled, or its tracked process is no longer active; a dead process is recorded as `failed` with phase `stale-process` instead of being reported as a wait timeout.
+These examples run against the current directory. The router stores jobs per project, so `status`, `result`, and `cancel` find a job only when they get the same `--cwd` it started with.
 
-The default `status --wait` deadline is 240 seconds. Use `--timeout-ms` to change it.
+`status <job-id> --wait` polls until the job completes, fails, or is cancelled. Each poll also checks that the job's process is still alive. If it died, the router marks the job `failed` with phase `stale-process` and returns, so you don't wait out the clock. The wait gives up after 240 seconds unless you pass `--timeout-ms`.
 
-The managed Claude print-job timeout defaults to **30 minutes** (`1800000` ms). Use `--timeout-ms` / `timeout_ms` to change it, or `0` to disable the managed timeout for that job. **`180000` ms (3 minutes) is only appropriate for short smoke tests.** Medium effort, multi-item briefs, and Explore/subagent fan-out need a higher bound; otherwise the router kills the process mid-flight and the print-mode JSON never arrives.
+A job times out after 30 minutes. `--timeout-ms`, or `timeout_ms` in an MCP call, changes that, and `0` turns the timeout off for that job. Three minutes is enough for a smoke test and nothing else. A job with several items, medium effort or higher, or subagents needs more, and a job the router kills at the timeout returns no answer.
 
-A timeout kill is not the same as “the model said nothing.” When a Claude session exists, the job is still `failed` with `timedOut: true`, but the result records `failureKind: "killed-in-progress"`, attaches `claudeSessionId`, and includes the job log path, session path, and a `claude --resume` pointer. `failureKind: "timed-out-empty"` is reserved for a true hard-empty timeout (no session, no output). `failureKind: "auth-failed"` is Claude not logged in. `failureKind: "claude-error"` is print-mode `is_error` JSON. Foreground managed jobs in those failed states exit 1.
+The MCP server also stops any tool call after 35 minutes, or after `timeout_ms` plus one minute if that is longer. `timeout_ms: 0` does not lift this limit. `CLAUDE_ROUTER_MCP_OUTER_TIMEOUT_MS` in the server's environment changes the 35 minutes. Your host may cut a call off sooner, so run long work in the background.
 
-Managed print argv puts `--` before the prompt so variadic flags such as `--add-dir` cannot swallow it.
+A failed job says why in `failureKind`:
 
-A host or MCP client may impose an additional deadline, so background mode is recommended for long work.
+| `failureKind` | What happened |
+| --- | --- |
+| `killed-in-progress` | The router killed Claude at the timeout after Claude had started a session or written output |
+| `timed-out-empty` | The timeout hit before Claude started a session or wrote anything |
+| `auth-failed` | Claude is not logged in |
+| `claude-error` | Claude returned an error result |
+| `empty` | Claude exited without a session or any output |
 
-## Models, Controls, and Lean Profiles
+For `killed-in-progress`, the companion's `result` prints the job log path and, when a session exists, the session file and a `claude --resume` command. A foreground job that fails exits with status 1.
 
-Claude Router does not freeze a list of model names, effort levels, permission modes, or native Claude flags. `models` reads the installed Claude CLI help on every call, and managed MCP schemas incorporate the live fields that the installed CLI advertises. Explicit `model` and `effort` values pass through for Claude itself to validate.
+Job records are files under `CLAUDE_ROUTER_DATA` if it is set, then `CODEX_PLUGIN_DATA`, then a `claude-router` folder in the OS temp directory. The OS can clear its temp directory, so set `CLAUDE_ROUTER_DATA` if results need to last. The router keeps the 50 most recent finished jobs per project and drops the rest.
 
-Claude help provides documented model examples rather than a guaranteed exhaustive registry. The catalog labels that boundary as `documented-examples`.
+## Models, controls, and lean profiles
+
+Claude Router keeps no allowlist of models, effort levels, or Claude flags. `models` reads `claude --help` on every call, and the MCP tool schemas for the job modes include the flags it finds there. The router passes `model` and `effort` to Claude unchecked, so Claude is what rejects a bad value.
+
+`claude --help` names a few models as examples. That is not a full list, and the catalog says so by reporting its completeness as `documented-examples`. A model that isn't listed can still work.
 
 Ask a host:
 
 ```text
 Use Claude Router models to show the model examples, effort levels,
-permission choices, and lean profiles advertised on this machine.
+and lean profiles advertised on this machine.
 ```
 
-Lean mode removes most project customizations and supplies a small default tool set. It is useful for narrow, self-contained tasks, but not for work that depends on project instructions, memory, plugins, hooks, MCP servers, or specialized skills.
+Lean mode starts Claude without most of your customizations and with a short tool list. Use it for a narrow task that stands alone. Skip it when the work depends on `CLAUDE.md`, plugins, hooks, MCP servers, or skills.
 
-| Router option | Authentication path | Default tools |
+| Say to the host | Companion flag | What Claude gets |
 | --- | --- | --- |
-| `lean` / `--lean=auto` | Detect from current credentials | Read-only: `Bash,Read`; exec: `Bash,Read,Edit,Write` |
-| `lean OAuth` / `--lean=oauth` | Claude `--safe-mode`; keeps subscription/OAuth authentication | Same defaults |
-| `lean API` / `--lean=api` | Claude `--bare`; requires API/provider credentials | Same defaults |
+| `lean` | `--lean` or `--lean=auto` | `--bare` when the environment has `ANTHROPIC_API_KEY` or a Bedrock, Vertex, or Foundry setting. Otherwise `--safe-mode`. |
+| `lean OAuth` | `--lean=oauth` | `--safe-mode`, which keeps your subscription login |
+| `lean API` | `--lean=api` | `--bare`, which needs API or provider credentials |
 
-Example host request:
+Every lean profile also sets a default tool list and a one-line system prompt. The read-only modes get `Bash,Read`. `exec` gets `Bash,Read,Edit,Write`. `--tools` and `--system-prompt` override those defaults.
 
 ```text
 Use Claude Router analyze in lean OAuth mode with model fable and max effort.
 Find the smallest safe fix for this parser bug. Do not edit files.
 ```
 
-Explicit `tools` and `system-prompt` values override the lean defaults. Do not combine Claude `--safe-mode` and `--bare`; they are different authentication paths.
+Don't pass `--safe-mode` and `--bare` together. They are different login paths and the router rejects the pair.
 
-See [Claude Router Capabilities](plugins/claude-router/docs/capabilities.md) for the complete capability boundaries and direct-runtime examples.
+[Claude Router Capabilities](plugins/claude-router/docs/capabilities.md) has more detail on each mode and more companion examples.
 
-## Direct Runtime Usage
+## Direct runtime usage
 
-Use the companion runtime directly from the plugin directory:
+Run the companion from the plugin directory:
 
 ```bash
 cd plugins/claude-router
@@ -367,7 +354,9 @@ node scripts/claude-companion.mjs exec --cwd /path/to/project "implement the nar
 node scripts/claude-companion.mjs review --cwd /path/to/project "review the current diff"
 ```
 
-Claude controls pass through:
+`--cwd` sets the project. Without it, the companion uses the current directory. If that directory is inside a Git repository, Claude runs at the repository root.
+
+Flags that `claude` accepts pass through:
 
 ```bash
 node scripts/claude-companion.mjs analyze --model opus --effort high "inspect performance risks"
@@ -376,9 +365,13 @@ node scripts/claude-companion.mjs exec --allowed-tools "Read,Edit" "apply the re
 node scripts/claude-companion.mjs analyze --lean --model fable --effort max "find the narrowest fix"
 ```
 
-## Guarded Claude CLI Access
+A flag the installed CLI does not list is not an error. The companion treats it as the start of the prompt, so check your spelling.
 
-Use `raw` or its `cli` alias for installed Claude features that do not have a managed mode. Pass the Claude arguments after `--`:
+The router puts `--` before the prompt when it calls `claude`. A flag that takes several values, such as `--add-dir`, can't swallow the prompt.
+
+## Guarded Claude CLI access
+
+`raw`, or its alias `cli`, runs any other `claude` command. Put the Claude arguments after `--`. From `plugins/claude-router`:
 
 ```bash
 node scripts/claude-companion.mjs raw -- mcp list
@@ -386,16 +379,18 @@ node scripts/claude-companion.mjs raw -- plugin list
 node scripts/claude-companion.mjs help mcp add
 ```
 
-Mutating Claude configuration is blocked unless explicitly allowed:
+The last line prints Claude's own help for `mcp add`.
+
+`raw` runs commands it knows are read-only, such as `mcp list`, `plugin list`, `doctor`, and `auth status`. It refuses three kinds of command until you add a flag:
+
+- A command that changes Claude or project configuration, such as `mcp add`. Add `--allow-mutating`.
+- A command the router has not classified, such as `agents` or `plugin marketplace list`. These need `--allow-mutating` too, even when they only read.
+- A permission bypass, such as `--permission-mode bypassPermissions`. Add `--allow-dangerous`.
 
 ```bash
 node scripts/claude-companion.mjs raw --allow-mutating -- \
   mcp add my-server -- node server.mjs
-```
 
-Dangerous permission bypass is blocked unless explicitly allowed:
-
-```bash
 node scripts/claude-companion.mjs raw --allow-dangerous -- \
   -p --permission-mode bypassPermissions "trusted sandbox task"
 ```
@@ -409,7 +404,7 @@ codex plugin remove claude-router@claude-router
 codex plugin marketplace remove claude-router
 ```
 
-If you previously followed the legacy standalone MCP instructions:
+If you once followed the older standalone MCP instructions, remove that server too:
 
 ```bash
 codex mcp remove claude-router
@@ -417,7 +412,7 @@ codex mcp remove claude-router
 
 ### Antigravity IDE
 
-Remove the `claude-router` plugin directory from the Antigravity global or workspace plugin location you selected. That removes the registration; delete the retained repository checkout separately only if you no longer need it.
+Delete the `claude-router` directory from the plugin location you used, global or workspace. The checkout is separate. Delete it too if you are done with it.
 
 ### Antigravity CLI (`agy`)
 
@@ -427,7 +422,7 @@ agy plugin uninstall claude-router
 agy plugin list
 ```
 
-Uninstalling the registration does not delete the retained repository checkout.
+This leaves the checkout in place.
 
 ### Claude Code
 
@@ -438,23 +433,25 @@ claude plugin marketplace remove claude-router
 
 ## Troubleshooting
 
-If setup reports `claude not found`, install Claude Code and make sure `claude` is on `PATH`.
+If `setup` tells you to install Claude Code, the companion could not find `claude`. Install it and check that `claude` is on your `PATH`.
 
-If setup reports missing authentication:
+If `setup` tells you to log in:
 
 ```bash
 claude auth login
 ```
 
-If Claude runs against the wrong project, provide `cwd` in the MCP tool request or pass `--cwd` to the direct runtime.
+If Claude runs in the wrong project, ask the host to pass your project path as `cwd`. With the companion, pass `--cwd`.
 
-If `raw` refuses a command, it detected a Claude configuration mutation or dangerous permission request. Use `--allow-mutating` or `--allow-dangerous` only when that action is explicitly intended.
+If `status` or `result` reports no jobs, pass the `--cwd` the job started with.
 
-If Codex cannot find Claude Router after installation, start a new Codex task.
+If `raw` refuses a command, the error names the flag that allows it. Add `--allow-mutating` or `--allow-dangerous` only if you meant to run that command.
 
-If Antigravity cannot find the skill, confirm the plugin is under `<workspace>/.agents/plugins/claude-router` or `~/.gemini/config/plugins/claude-router`, then start a new conversation.
+If Codex cannot find Claude Router after you install it, start a new Codex task.
 
-If Antigravity CLI reports `missing plugin.json`, pass `.agy`, not the repository root:
+If Antigravity cannot find the skill, check that the plugin is at `<workspace>/.agents/plugins/claude-router` or `~/.gemini/config/plugins/claude-router`, then start a new conversation.
+
+If `agy` says it found no `plugin.json`, you gave it the repository root. Give it `.agy`:
 
 ```bash
 agy plugin validate .agy
@@ -470,8 +467,8 @@ npm test
 npm run validate
 ```
 
-`npm run validate` checks the plugin manifest and cross-host version alignment.
+`npm run validate` checks the plugin manifests, that every host adapter has the same version, and that this README still contains a few required host commands.
 
 ## License
 
-Apache-2.0. This project is independent and is not affiliated with Anthropic, Google, or OpenAI.
+Apache-2.0. This project is not affiliated with Anthropic, Google, or OpenAI.
